@@ -1,0 +1,20 @@
+# Python virtual environment
+venv/
+.venv/
+ENV/
+env/
+*.pyc
+__pycache__/
+
+# Node modules
+node_modules/
+dist/
+.env
+
+# Environment configuration files
+.env
+backend/.env
+
+# OS files
+.DS_Store
+Thumbs.db

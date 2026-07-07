@@ -1,0 +1,10 @@
+fastapi>=0.115.0
+uvicorn>=0.30.0
+fastmcp>=1.2.0
+mcp>=1.2.0
+google-generativeai>=0.8.0
+ollama>=0.4.0
+mysql-connector-python>=9.0.0
+python-dotenv>=1.0.1
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
