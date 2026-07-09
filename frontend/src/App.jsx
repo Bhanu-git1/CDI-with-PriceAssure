@@ -60,7 +60,7 @@ export default function App() {
       }
 
       const result = await response.json();
-      
+
       // Add assistant response to log
       const assistantMsg = {
         sender: 'assistant',
@@ -69,9 +69,9 @@ export default function App() {
         data: result.data,
         error: result.error
       };
-      
+
       setMessages(prev => [...prev, assistantMsg]);
-      
+
       // Refresh status in case of changes
       if (result.sql && (result.sql.toUpperCase().includes('CREATE') || result.sql.toUpperCase().includes('ALTER'))) {
         checkStatus();
@@ -99,7 +99,7 @@ export default function App() {
     <div className="app-container">
       {/* Main Chat Workstation */}
       <div className="main-chat-area">
-        
+
         {/* Navigation / Header */}
         <div className="chat-header">
           <div className="chat-header-title">
@@ -107,7 +107,7 @@ export default function App() {
           </div>
           <div className="chat-header-status">
             <span>Model: <strong>{activeModel || 'Detecting...'}</strong></span>
-            <div className="status-dot" style={{ 
+            <div className="status-dot" style={{
               backgroundColor: serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)',
               boxShadow: `0 0 8px ${serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)'}`
             }} />
@@ -123,31 +123,31 @@ export default function App() {
               <p>
                 Ask questions about your data in plain English. The AI will translate your question into a read-only SQL query, retrieve results from MySQL via the Model Context Protocol (MCP), and display charts or tables!
               </p>
-              
+
               <div style={{ width: '100%', marginTop: '24px' }}>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: '600' }}>
-                  TRY ASKING ABOUT YOUR `Leakage_Activity` TABLE:
+                  {/* TRY ASKING ABOUT YOUR `Leakage_Activity` TABLE: */}
                 </p>
                 <div className="suggested-queries">
-                  <button 
+                  <button
                     className="suggested-btn"
                     onClick={() => handleSendMessage("Show me a list of all tables in the database")}
                   >
                     📋 List all tables in the database
                   </button>
-                  <button 
-                    className="suggested-btn" 
+                  <button
+                    className="suggested-btn"
                     onClick={() => handleSendMessage("Show the first 5 rows in the Leakage_Activity table")}
                   >
                     📈 View sample rows from Leakage_Activity
                   </button>
-                  <button 
+                  <button
                     className="suggested-btn"
                     onClick={() => handleSendMessage("Which brand has the highest leakage percentage?")}
                   >
                     🏷️ Find the brand with highest leakage percentage
                   </button>
-                  <button 
+                  <button
                     className="suggested-btn"
                     onClick={() => handleSendMessage("What is the average Leakage_Percentage grouped by State?")}
                   >
@@ -177,23 +177,23 @@ export default function App() {
               </div>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
 
         {/* Message Input Workspace */}
         <div className="input-area">
           <div className="input-container">
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="Ask a question about database records (e.g. 'Show average brand rejections by State')..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyPress}
               disabled={queryLoading}
             />
-            <button 
-              className="send-btn" 
+            <button
+              className="send-btn"
               onClick={() => handleSendMessage()}
               disabled={queryLoading || !inputValue.trim()}
             >
