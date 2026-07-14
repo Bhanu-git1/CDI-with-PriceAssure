@@ -5,8 +5,8 @@
   width: 100vw;
   background-color: var(--bg-primary);
   background-image: 
-    radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.04) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.04) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, rgba(1, 118, 211, 0.04) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(27, 150, 255, 0.04) 0px, transparent 50%);
 }
 
 /* Sidebar - Schema Explorer */
@@ -60,7 +60,7 @@
 }
 
 .schema-item:hover {
-  border-color: rgba(6, 182, 212, 0.2);
+  border-color: rgba(1, 118, 211, 0.2);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -116,7 +116,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 32px;
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(8px);
   z-index: 5;
 }
@@ -126,12 +126,34 @@
   font-weight: 600;
 }
 
+.header-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-logo svg {
+  flex-shrink: 0;
+}
+
 .chat-header-status {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
   color: var(--text-secondary);
+}
+
+.sf-user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(1, 118, 211, 0.08);
+  color: var(--accent-primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .status-dot {
@@ -165,6 +187,15 @@
   gap: 16px;
 }
 
+.empty-state-icon {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+
 .empty-state h3 {
   color: var(--text-primary);
   font-size: 1.5rem;
@@ -183,7 +214,7 @@
 }
 
 .suggested-btn {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.6);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
   padding: 12px 16px;
@@ -195,10 +226,11 @@
 }
 
 .suggested-btn:hover {
-  background: rgba(6, 182, 212, 0.05);
+  background: rgba(1, 118, 211, 0.06);
   border-color: var(--accent-secondary);
   color: var(--text-primary);
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(1, 118, 211, 0.1);
 }
 
 /* Message Bubbles */
@@ -227,7 +259,7 @@
 
 .user .message-bubble {
   background: var(--accent-gradient);
-  color: var(--text-primary);
+  color: #ffffff;
   border-bottom-right-radius: 2px;
 }
 
@@ -238,30 +270,30 @@
   border-bottom-left-radius: 2px;
 }
 
-/* Structured Output (SQL & Data Visualizer) */
+/* Structured Output (SOQL & Data Visualizer) */
 .sql-container {
   margin-top: 14px;
   border-radius: 8px;
   overflow: hidden;
-  background: #060913;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: #032d60;
+  border: 1px solid rgba(27, 150, 255, 0.15);
 }
 
 .sql-header {
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(27, 150, 255, 0.08);
+  border-bottom: 1px solid rgba(27, 150, 255, 0.1);
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .sql-header button {
   background: transparent;
   border: none;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
   font-size: 0.8rem;
 }
@@ -275,7 +307,7 @@
   overflow-x: auto;
   font-family: 'Courier New', Courier, monospace;
   font-size: 0.85rem;
-  color: #a7f3d0;
+  color: #80d4ff;
   white-space: pre-wrap;
 }
 
@@ -311,9 +343,9 @@
 }
 
 .vis-tab.active {
-  color: var(--accent-secondary);
+  color: var(--accent-primary);
   background: var(--bg-tertiary);
-  border-bottom: 2px solid var(--accent-secondary);
+  border-bottom: 2px solid var(--accent-primary);
 }
 
 .vis-content {
@@ -331,7 +363,7 @@
 
 .custom-table th {
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(1, 118, 211, 0.04);
   color: var(--text-secondary);
   font-weight: 600;
   border-bottom: 2px solid var(--border-color);
@@ -344,7 +376,7 @@
 }
 
 .custom-table tr:hover {
-  background: rgba(255, 255, 255, 0.01);
+  background: rgba(1, 118, 211, 0.02);
 }
 
 /* Custom Chart Visualization */
@@ -377,7 +409,7 @@
 .bar-track {
   width: 100%;
   height: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.04);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -392,7 +424,7 @@
 /* Input Area */
 .input-area {
   padding: 24px 32px;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.85);
   border-top: 1px solid var(--border-color);
 }
 
@@ -404,12 +436,12 @@
   border-radius: 12px;
   padding: 6px 12px;
   align-items: center;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .input-container:focus-within {
-  border-color: var(--accent-secondary);
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.15);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(1, 118, 211, 0.12);
 }
 
 .input-container input {
@@ -437,17 +469,19 @@
   justify-content: center;
   color: white;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.2s ease, transform 0.15s ease;
 }
 
 .send-btn:hover {
   opacity: 0.9;
+  transform: scale(1.05);
 }
 
 .send-btn:disabled {
   background: var(--bg-tertiary);
   color: var(--text-muted);
   cursor: not-allowed;
+  transform: none;
 }
 
 /* Loading Dots Indicator */
@@ -477,8 +511,8 @@
 
 .error-message {
   color: var(--status-danger);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(234, 0, 30, 0.2);
+  background: rgba(234, 0, 30, 0.05);
   border-radius: 6px;
   padding: 10px 12px;
   margin-top: 10px;

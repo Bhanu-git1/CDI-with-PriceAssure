@@ -1,79 +1,105 @@
 import React, { useMemo, useState } from 'react';
 
 export default function SchemaExplorer({ schemaText, loading }) {
-  const [expandedTable, setExpandedTable] = useState(null);
+  const [expandedObject, setExpandedObject] = useState(null);
 
-  // Parse schema string into structured objects
-  const tables = useMemo(() => {
+  // Parse Salesforce schema string into structured objects
+  const sfObjects = useMemo(() => {
     if (!schemaText) return [];
     
-    const parsedTables = [];
+    const parsedObjects = [];
     const lines = schemaText.split('\n');
     
     for (const line of lines) {
-      // Look for: Table 'name': [col (type), col (type)]
-      const match = line.match(/^Table '(.+?)': \[(.+?)\]$/);
+      // Match Salesforce schema format:
+      // Object 'ObjectName' (Label: 'Label'): [field1 (type), field2 (type)]
+      const match = line.match(/^Object '(.+?)' \(Label: '(.+?)'\): \[(.+?)\]$/);
       if (match) {
-        const tableName = match[1];
-        const columnsRaw = match[2];
+        const objectName = match[1];
+        const objectLabel = match[2];
+        const fieldsRaw = match[3];
         
-        // Parse columns e.g. "id (int), name (varchar)"
-        const columns = columnsRaw.split(', ').map(col => {
-          const colParts = col.split(' ');
-          const name = colParts[0];
-          const type = colParts.slice(1).join(' ').replace(/[()]/g, '');
-          return { name, type };
+        // Parse fields e.g. "Id (id), Name (string), Amount (currency)"
+        const fields = fieldsRaw.split(', ').map(fieldStr => {
+          // Handle "... +N more fields" suffix
+          if (fieldStr.startsWith('...')) {
+            return { name: fieldStr, type: '', isOverflow: true };
+          }
+          const fieldParts = fieldStr.match(/^(.+?) \((.+?)\)$/);
+          if (fieldParts) {
+            return { name: fieldParts[1], type: fieldParts[2] };
+          }
+          return { name: fieldStr, type: 'unknown' };
         });
         
-        parsedTables.push({
-          name: tableName,
-          columns
+        parsedObjects.push({
+          name: objectName,
+          label: objectLabel,
+          fields,
+          isCustom: objectName.endsWith('__c')
         });
       }
     }
     
-    // Sort tables alphabetically
-    return parsedTables.sort((a, b) => a.name.localeCompare(b.name));
+    // Sort: standard objects first, then custom objects, both alphabetically
+    return parsedObjects.sort((a, b) => {
+      if (a.isCustom !== b.isCustom) return a.isCustom ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
   }, [schemaText]);
 
-  const toggleExpand = (tableName) => {
-    if (expandedTable === tableName) {
-      setExpandedTable(null);
+  const toggleExpand = (objectName) => {
+    if (expandedObject === objectName) {
+      setExpandedObject(null);
     } else {
-      setExpandedTable(tableName);
+      setExpandedObject(objectName);
     }
+  };
+
+  // Map Salesforce field types to color-coded badges
+  const getTypeColor = (type) => {
+    if (type.startsWith('reference')) return '#e879f9'; // purple for lookups
+    if (['currency', 'double', 'int', 'percent'].includes(type)) return '#34d399'; // green for numbers
+    if (['date', 'datetime'].includes(type)) return '#fbbf24'; // amber for dates
+    if (['boolean'].includes(type)) return '#60a5fa'; // blue for booleans
+    if (type.startsWith('picklist')) return '#fb923c'; // orange for picklists
+    return 'var(--accent-secondary)'; // default
   };
 
   return (
     <div className="sidebar">
       <div className="sidebar-header">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-          <path d="M3 5V19A9 3 0 0 0 21 19V5"></path>
-          <path d="M3 12A9 3 0 0 0 21 12"></path>
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M8 12l2 2 4-4"/>
         </svg>
-        <h2>SCHEMA EXPLORER</h2>
+        <h2>SALESFORCE OBJECTS</h2>
       </div>
       
       <div className="schema-list">
         {loading ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
-            Reading Database Schema...
+            Reading Salesforce Schema...
           </div>
-        ) : tables.length === 0 ? (
+        ) : sfObjects.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
-            No tables discovered. Check database connection.
+            No objects discovered. Check Salesforce connection.
           </div>
         ) : (
-          tables.map((table) => {
-            const isExpanded = expandedTable === table.name;
+          sfObjects.map((obj) => {
+            const isExpanded = expandedObject === obj.name;
             return (
-              <div key={table.name} className="schema-item">
+              <div key={obj.name} className="schema-item">
                 <div 
                   className="schema-title" 
-                  onClick={() => toggleExpand(table.name)}
+                  onClick={() => toggleExpand(obj.name)}
                 >
-                  <span>📋 {table.name}</span>
+                  <span>
+                    {obj.isCustom ? '🔧' : '☁️'} {obj.name}
+                    <span style={{ fontSize: '0.7rem', opacity: 0.5, marginLeft: '6px' }}>
+                      {obj.label}
+                    </span>
+                  </span>
                   <span style={{ fontSize: '0.75rem', opacity: 0.6 }}>
                     {isExpanded ? '▼' : '▶'}
                   </span>
@@ -81,10 +107,21 @@ export default function SchemaExplorer({ schemaText, loading }) {
                 
                 {isExpanded && (
                   <div className="schema-columns">
-                    {table.columns.map((col) => (
-                      <div key={col.name} className="column-info">
-                        <span className="column-name">{col.name}</span>
-                        <span className="column-type">{col.type}</span>
+                    {obj.fields.map((field, idx) => (
+                      <div key={field.name + idx} className="column-info">
+                        <span className="column-name">
+                          {field.isOverflow ? (
+                            <em style={{ opacity: 0.6 }}>{field.name}</em>
+                          ) : field.name}
+                        </span>
+                        {!field.isOverflow && (
+                          <span 
+                            className="column-type"
+                            style={{ color: getTypeColor(field.type) }}
+                          >
+                            {field.type}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>

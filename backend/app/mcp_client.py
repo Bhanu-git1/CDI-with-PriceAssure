@@ -5,31 +5,39 @@ import logging
 from contextlib import asynccontextmanager
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from backend.app.config import settings
+from app.config import settings
 
 logger = logging.getLogger("mcp-client")
 
-class MCPDatabaseClient:
-    """Manages the lifecycle and calls to the local FastMCP MySQL server."""
+class MCPSalesforceClient:
+    """Manages the lifecycle and calls to the local FastMCP Salesforce server."""
     
     def __init__(self):
-        # Resolve the absolute path to the mysql_server.py file
+        # Resolve the absolute path to the salesforce_server.py file
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Up one level, then to mcp_server/mysql_server.py
-        server_path = os.path.abspath(os.path.join(current_dir, "..", "mcp_server", "mysql_server.py"))
+        # Up one level, then to mcp_server/salesforce_server.py
+        server_path = os.path.abspath(os.path.join(current_dir, "..", "mcp_server", "salesforce_server.py"))
         
+        # Build environment variables for the MCP subprocess
+        env_vars = {
+            **os.environ,
+            "SF_USERNAME": settings.SF_USERNAME,
+            "SF_PASSWORD": settings.SF_PASSWORD,
+            "SF_SECURITY_TOKEN": settings.SF_SECURITY_TOKEN,
+            "SF_DOMAIN": settings.SF_DOMAIN,
+        }
+
+        # Pass session-based credentials if available (for Salesforce frontend context)
+        if settings.SF_SESSION_ID:
+            env_vars["SF_SESSION_ID"] = settings.SF_SESSION_ID
+        if settings.SF_INSTANCE_URL:
+            env_vars["SF_INSTANCE_URL"] = settings.SF_INSTANCE_URL
+
         # Configure connection to the server via stdio
         self.server_params = StdioServerParameters(
             command=sys.executable,  # runs with the same python interpreter
             args=[server_path],
-            env={
-                **os.environ,
-                "DB_HOST": settings.DB_HOST,
-                "DB_PORT": str(settings.DB_PORT),
-                "DB_USER": settings.DB_USER,
-                "DB_PASSWORD": settings.DB_PASSWORD,
-                "DB_NAME": settings.DB_NAME,
-            }
+            env=env_vars
         )
         self._session = None
         self._exit_stack = None
@@ -39,7 +47,7 @@ class MCPDatabaseClient:
         if self._session:
             return
             
-        logger.info("Starting local FastMCP MySQL server...")
+        logger.info("Starting local FastMCP Salesforce server...")
         try:
             # We manage stdio client lifecycle
             self._stdio_ctx = stdio_client(self.server_params)
@@ -51,7 +59,7 @@ class MCPDatabaseClient:
             
             # Initialize connection
             await self._session.initialize()
-            logger.info("Successfully connected to MCP MySQL server.")
+            logger.info("Successfully connected to MCP Salesforce server.")
             
         except Exception as e:
             logger.error(f"Failed to launch or connect to MCP server: {e}")
@@ -103,4 +111,4 @@ class MCPDatabaseClient:
         return str(result)
 
 # Single global client instance
-db_mcp_client = MCPDatabaseClient()
+sf_mcp_client = MCPSalesforceClient()

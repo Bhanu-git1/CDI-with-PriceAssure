@@ -8,12 +8,15 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 env_file_path = os.path.abspath(os.path.join(current_dir, "..", ".env"))
 
 class Settings(BaseSettings):
-    # Database Settings
-    DB_HOST: str = "localhost"
-    DB_PORT: int = 3306
-    DB_USER: str = "mcp_readonly"
-    DB_PASSWORD: str = "mcp_secure_pass123"
-    DB_NAME: str = "mcp_poc_db"
+    # Salesforce Connection Settings
+    SF_USERNAME: str = ""
+    SF_PASSWORD: str = ""
+    SF_SECURITY_TOKEN: str = ""
+    SF_DOMAIN: str = "login"  # 'login' for production, 'test' for sandbox
+
+    # Optional: Session-based auth (passed from Salesforce frontend at runtime)
+    SF_SESSION_ID: Optional[str] = None
+    SF_INSTANCE_URL: Optional[str] = None
 
     # LLM Settings
     GEMINI_API_KEY: Optional[str] = None
@@ -24,7 +27,11 @@ class Settings(BaseSettings):
     PORT: int = 8000
     HOST: str = "0.0.0.0"
 
-    @field_validator("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME", "GEMINI_API_KEY", "OLLAMA_MODEL", "OLLAMA_HOST", "HOST", mode="before")
+    @field_validator(
+        "SF_USERNAME", "SF_PASSWORD", "SF_SECURITY_TOKEN", "SF_DOMAIN",
+        "GEMINI_API_KEY", "OLLAMA_MODEL", "OLLAMA_HOST", "HOST",
+        mode="before"
+    )
     @classmethod
     def strip_quotes(cls, v):
         if isinstance(v, str):

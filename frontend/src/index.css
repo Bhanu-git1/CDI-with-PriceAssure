@@ -1,28 +1,30 @@
+/* Salesforce-safe font stack — no external font loading (CSP compliant) */
 :root {
-  --bg-primary: #f8fafc;          /* Light slate gray background */
+  --bg-primary: #f4f6f9;          /* Salesforce-inspired light gray */
   --bg-secondary: #ffffff;        /* Pure white for chat blocks/inputs */
-  --bg-tertiary: #f1f5f9;         /* Very light gray for panels/visualizations */
+  --bg-tertiary: #eef1f6;         /* Very light gray for panels/visualizations */
   
-  --accent-primary: #4f46e5;      /* Premium Indigo */
-  --accent-secondary: #0ea5e9;    /* Clean Sky Blue */
-  --accent-gradient: linear-gradient(135deg, #4f46e5 0%, #0ea5e9 100%);
+  --accent-primary: #0176d3;      /* Salesforce Blue */
+  --accent-secondary: #1b96ff;    /* Salesforce Light Blue */
+  --accent-gradient: linear-gradient(135deg, #032d60 0%, #0176d3 50%, #1b96ff 100%);
   
-  --text-primary: #0f172a;        /* Dark slate for readable text */
-  --text-secondary: #475569;      /* Medium slate for secondary text */
-  --text-muted: #64748b;          /* Soft slate for details */
+  --text-primary: #181818;        /* Dark text for readability */
+  --text-secondary: #444444;      /* Medium text for secondary */
+  --text-muted: #706e6b;          /* Salesforce muted text */
   
   --border-color: rgba(0, 0, 0, 0.08); /* Soft light border */
-  --border-focus: rgba(79, 70, 229, 0.4);
+  --border-focus: rgba(1, 118, 211, 0.4);
   
-  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-bg: rgba(255, 255, 255, 0.85);
   --glass-border: rgba(0, 0, 0, 0.04);
-  --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.04);
+  --glass-shadow: 0 8px 32px 0 rgba(3, 45, 96, 0.06);
   
-  --font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  /* System font stack safe for Salesforce CSP — no external fonts needed */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
   
-  --status-success: #10b981;
-  --status-warning: #f59e0b;
-  --status-danger: #ef4444;
+  --status-success: #2e844a;      /* Salesforce success green */
+  --status-warning: #fe9339;      /* Salesforce warning amber */
+  --status-danger: #ea001e;       /* Salesforce error red */
 }
 
 * {
@@ -31,14 +33,18 @@
   padding: 0;
 }
 
-body {
+body, :host {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* When running standalone (not inside Salesforce) */
+body {
   height: 100vh;
   width: 100vw;
-  -webkit-font-smoothing: antialiased;
 }
 
 /* Custom Scrollbars */

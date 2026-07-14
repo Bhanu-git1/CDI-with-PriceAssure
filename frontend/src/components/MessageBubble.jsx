@@ -10,6 +10,11 @@ export default function MessageBubble({ message }) {
 
   const hasData = data && Array.isArray(data) && data.length > 0;
 
+  // Detect if the query is SOQL or SOSL
+  const queryLabel = sql
+    ? (sql.trim().toUpperCase().startsWith('FIND') ? 'SOSL Search' : 'SOQL Query')
+    : 'Query';
+
   const copySqlToClipboard = () => {
     if (!sql) return;
     navigator.clipboard.writeText(sql);
@@ -59,7 +64,7 @@ export default function MessageBubble({ message }) {
           <div style={{ whiteSpace: 'pre-line' }}>{text}</div>
         )}
 
-        {/* Display SQL block under explanation if available */}
+        {/* Display SOQL/SOSL block under explanation if available */}
         {sender === 'assistant' && sql && (
           <div style={{ marginTop: '12px' }}>
             <button
@@ -77,15 +82,15 @@ export default function MessageBubble({ message }) {
                 padding: '2px 0'
               }}
             >
-              {showSql ? 'Hide Generated SQL 🔼' : 'Show Generated SQL 🔽'}
+              {showSql ? `Hide Generated ${queryLabel} 🔼` : `Show Generated ${queryLabel} 🔽`}
             </button>
             
             {showSql && (
           <div className="sql-container">
             <div className="sql-header">
-              <span>MySQL SELECT Query</span>
+              <span>{queryLabel}</span>
               <button onClick={copySqlToClipboard}>
-                {copied ? 'Copied!' : 'Copy SQL'}
+                {copied ? 'Copied!' : `Copy ${queryLabel}`}
               </button>
             </div>
             <pre className="sql-body">{sql}</pre>
