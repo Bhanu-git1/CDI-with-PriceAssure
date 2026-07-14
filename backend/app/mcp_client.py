@@ -27,12 +27,6 @@ class MCPSalesforceClient:
             "SF_DOMAIN": settings.SF_DOMAIN,
         }
 
-        # Pass session-based credentials if available (for Salesforce frontend context)
-        if settings.SF_SESSION_ID:
-            env_vars["SF_SESSION_ID"] = settings.SF_SESSION_ID
-        if settings.SF_INSTANCE_URL:
-            env_vars["SF_INSTANCE_URL"] = settings.SF_INSTANCE_URL
-
         # Configure connection to the server via stdio
         self.server_params = StdioServerParameters(
             command=sys.executable,  # runs with the same python interpreter

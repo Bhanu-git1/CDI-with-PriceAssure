@@ -59,8 +59,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
-    sf_session_id: Optional[str] = None
-    sf_instance_url: Optional[str] = None
 
 # Endpoints
 
@@ -85,12 +83,6 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
         
     logger.info(f"Received chat request: {request.message}")
-    
-    # If the frontend passes Salesforce session credentials, update the MCP client dynamically
-    if request.sf_session_id and request.sf_instance_url:
-        logger.info("Using Salesforce session credentials from frontend context.")
-        # These would be used for per-request auth in a production implementation
-        # For now, the MCP server uses env-based credentials
     
     # Run the prompt-tool calling loop
     response_data = await llm_service.process_chat(request.message, request.history)

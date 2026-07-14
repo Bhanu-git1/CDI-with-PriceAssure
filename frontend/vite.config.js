@@ -13,21 +13,5 @@ export default defineConfig({
         secure: false,
       }
     }
-  },
-  build: {
-    // Build as IIFE (self-executing) bundle for Salesforce Static Resource
-    // Salesforce loadScript() cannot handle ES modules — it needs a plain script
-    outDir: 'dist',
-    cssCodeSplit: false, // Bundle all CSS into a single file
-    rollupOptions: {
-      input: './src/main.jsx',
-      output: {
-        // IIFE format — self-executes when loaded via loadScript
-        format: 'iife',
-        // Predictable filenames directly at the root of dist/ (no assets/ subfolder)
-        entryFileNames: 'sfchat.js',
-        assetFileNames: 'sfchat[extname]'
-      }
-    }
   }
 })

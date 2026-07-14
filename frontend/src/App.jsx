@@ -4,9 +4,9 @@ import './App.css';
 
 // Default endpoint fallback
 const getInitialEndpoint = () => {
-  const configUrl = window.__SF_CHAT_CONFIG__?.apiEndpoint;
+  const envUrl = import.meta.env.VITE_API_URL;
   const savedUrl = localStorage.getItem('__sf_chat_api_endpoint__');
-  return savedUrl || configUrl || 'http://localhost:8000';
+  return savedUrl || envUrl || 'http://localhost:8000';
 };
 
 export default function App() {
@@ -22,11 +22,6 @@ export default function App() {
   const [tempEndpoint, setTempEndpoint] = useState(apiEndpoint);
 
   const messagesEndRef = useRef(null);
-
-  // Salesforce context (injected by LWC wrapper)
-  const sfUserId = window.__SF_CHAT_CONFIG__?.userId || null;
-  const sfSessionId = window.__SF_CHAT_CONFIG__?.sessionId || null;
-  const sfInstanceUrl = window.__SF_CHAT_CONFIG__?.instanceUrl || null;
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -72,12 +67,6 @@ export default function App() {
         message: queryText,
         history: messages
       };
-
-      // Pass Salesforce session credentials if available (for user-level auth)
-      if (sfSessionId && sfInstanceUrl) {
-        requestBody.sf_session_id = sfSessionId;
-        requestBody.sf_instance_url = sfInstanceUrl;
-      }
 
       const response = await fetch(`${apiEndpoint}/api/chat`, {
         method: 'POST',
@@ -152,15 +141,6 @@ export default function App() {
               boxShadow: `0 0 8px ${serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)'}`
             }} />
             <span style={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{serverStatus}</span>
-            {sfUserId && (
-              <span className="sf-user-badge" title={`SF User: ${sfUserId}`}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                  <circle cx="12" cy="7" r="4"/>
-                </svg>
-                SF
-              </span>
-            )}
             <button 
               onClick={() => setShowSettings(!showSettings)}
               style={{

@@ -19,8 +19,8 @@
   --glass-border: rgba(0, 0, 0, 0.04);
   --glass-shadow: 0 8px 32px 0 rgba(3, 45, 96, 0.06);
   
-  /* System font stack safe for Salesforce CSP — no external fonts needed */
-  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  /* Premium Google Fonts stack (Outfit for headings/UI, Inter fallback) */
+  --font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   
   --status-success: #2e844a;      /* Salesforce success green */
   --status-warning: #fe9339;      /* Salesforce warning amber */

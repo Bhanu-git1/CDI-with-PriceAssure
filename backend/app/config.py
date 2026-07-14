@@ -14,10 +14,6 @@ class Settings(BaseSettings):
     SF_SECURITY_TOKEN: str = ""
     SF_DOMAIN: str = "login"  # 'login' for production, 'test' for sandbox
 
-    # Optional: Session-based auth (passed from Salesforce frontend at runtime)
-    SF_SESSION_ID: Optional[str] = None
-    SF_INSTANCE_URL: Optional[str] = None
-
     # LLM Settings
     GEMINI_API_KEY: Optional[str] = None
     OLLAMA_MODEL: str = "qwen2.5-coder:7b"
