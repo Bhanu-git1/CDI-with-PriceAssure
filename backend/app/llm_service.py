@@ -36,7 +36,7 @@ SOQL SYNTAX RULES (IMPORTANT — follow these strictly):
 3. Use `LIKE` with `%` for partial text matches: `WHERE Name LIKE '%Acme%'`.
 4. Date literals: `TODAY`, `LAST_N_DAYS:30`, `THIS_MONTH`, `LAST_MONTH`, `THIS_YEAR`, `LAST_YEAR`.
 5. Aggregate functions: `COUNT()`, `COUNT(Id)`, `SUM(Amount)`, `AVG(Amount)`, `MIN()`, `MAX()`.
-6. `GROUP BY` works with aggregate queries. Use `HAVING` to filter aggregated results.
+6. `GROUP BY` works with aggregate queries. Use `HAVING` to the filter aggregated results.
 7. To query related objects, use relationship names:
    - Child-to-Parent: `SELECT Name, Account.Name FROM Contact` (dot notation).
    - Parent-to-Child subqueries: `SELECT Name, (SELECT LastName FROM Contacts) FROM Account`.
@@ -82,10 +82,10 @@ You MUST follow these rules:
 5. Use the tool `execute_soql` to fetch the data from Salesforce.
 6. If the user wants a cross-object keyword search (not a structured query), use `search_records` with a SOSL query.
 7. After receiving the tool execution result, formulate your final answer.
-8. In your final response:
+8. In your final response: 
    - Provide a clear, natural language explanation of the results.
    - If the results are structured data, include the exact SOQL query used inside a markdown code block labeled with `soql`.
-   - Summarize the data briefly.
+   - Summarize the data briefly. 
 """
 
 class LLMService:
