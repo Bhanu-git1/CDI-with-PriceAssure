@@ -108,7 +108,7 @@ class LLMService:
                         model_name = candidate
                         break
                 else:
-                    # Pick the first one that has "flash" in it
+                    # Pick the first one that has "flash" into it 
                     flash_candidates = [m for m in available_models if 'flash' in m.lower()]
                     if flash_candidates:
                         model_name = flash_candidates[0]
