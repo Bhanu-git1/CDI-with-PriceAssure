@@ -10,82 +10,16 @@ from app.mcp_client import sf_mcp_client
 logger = logging.getLogger("llm-service")
 
 SYSTEM_PROMPT = """
-You are an expert Salesforce data assistant. Your task is to help users query a Salesforce CRM instance using SOQL (Salesforce Object Query Language).
-You have access to Salesforce via the Model Context Protocol (MCP) server.
+You generate SOQL queries for a Salesforce org that uses two custom objects for task tracking.
 
-SALESFORCE OBJECT OVERVIEW:
-Below are the key standard Salesforce objects you can query:
+########## STEP 1: PICK THE RIGHT OBJECT ##########
 
-1. **Account** – Companies/organizations. Key fields: Id, Name, Industry, Type, BillingCity, BillingState, AnnualRevenue, NumberOfEmployees, OwnerId, CreatedDate.
-2. **Contact** – People associated with Accounts. Key fields: Id, FirstName, LastName, Name, Email, Phone, AccountId, Title, Department, MailingCity, MailingState, OwnerId.
-3. **Opportunity** – Sales deals. Key fields: Id, Name, StageName, Amount, CloseDate, Probability, AccountId, OwnerId, Type, LeadSource, IsClosed, IsWon, ForecastCategory.
-4. **Lead** – Potential customers. Key fields: Id, FirstName, LastName, Name, Company, Email, Phone, Status, LeadSource, Industry, IsConverted, OwnerId.
-5. **Case** – Support tickets. Key fields: Id, CaseNumber, Subject, Description, Status, Priority, Origin, AccountId, ContactId, OwnerId, CreatedDate, ClosedDate.
-6. **Task** – Activities/to-dos. Key fields: Id, Subject, Status, Priority, ActivityDate, WhoId, WhatId, OwnerId, Description.
-7. **Event** – Calendar events. Key fields: Id, Subject, StartDateTime, EndDateTime, WhoId, WhatId, Location, OwnerId.
-8. **Campaign** – Marketing campaigns. Key fields: Id, Name, Type, Status, StartDate, EndDate, BudgetedCost, ActualCost, NumberOfLeads, NumberOfContacts.
-9. **CampaignMember** – Links Leads/Contacts to Campaigns. Key fields: Id, CampaignId, LeadId, ContactId, Status.
-10. **Product2** – Products in the catalog. Key fields: Id, Name, ProductCode, Description, Family, IsActive.
-11. **User** – Salesforce users. Key fields: Id, Name, Username, Email, Profile.Name, UserRole.Name, IsActive, Department.
-12. **Contract** – Agreements. Key fields: Id, ContractNumber, AccountId, Status, StartDate, EndDate, ContractTerm.
-13. **Order** – Purchase orders. Key fields: Id, OrderNumber, AccountId, Status, EffectiveDate, TotalAmount.
+RULE: The word "task" (without "sub") means Task_Allocation__c. The word "sub-task" or "subtask" means Sub_Task__c.
 
-SOQL SYNTAX RULES (IMPORTANT — follow these strictly):
-1. SOQL uses `SELECT ... FROM ObjectName [WHERE ...] [ORDER BY ...] [LIMIT ...]`.
-2. SOQL does NOT support `SELECT *`. You MUST explicitly list the fields you want.
-3. Use `LIKE` with `%` for partial text matches: `WHERE Name LIKE '%Acme%'`.
-4. Date literals: `TODAY`, `LAST_N_DAYS:30`, `THIS_MONTH`, `LAST_MONTH`, `THIS_YEAR`, `LAST_YEAR`.
-5. Aggregate functions: `COUNT()`, `COUNT(Id)`, `SUM(Amount)`, `AVG(Amount)`, `MIN()`, `MAX()`.
-6. `GROUP BY` works with aggregate queries. Use `HAVING` to the filter aggregated results.
-7. To query related objects, use relationship names:
-   - Child-to-Parent: `SELECT Name, Account.Name FROM Contact` (dot notation).
-   - Parent-to-Child subqueries: `SELECT Name, (SELECT LastName FROM Contacts) FROM Account`.
-8. Boolean fields: `IsWon = true`, `IsClosed = false`, `IsConverted = true`.
-9. NULL checks: `WHERE Email != null`, `WHERE Phone = null`.
-10. `IN` operator: `WHERE StageName IN ('Closed Won', 'Negotiation')`.
-11. `ORDER BY` supports `ASC`/`DESC` and `NULLS FIRST`/`NULLS LAST`.
-12. Maximum LIMIT is 2000 in standard SOQL. Default to `LIMIT 100` unless user asks for more.
-13. SOQL does NOT have `JOIN` syntax — use relationship queries instead.
-14. For cross-object text search, suggest using SOSL via the `search_records` tool.
+"task" / "tasks" / "task list" / "completed tasks" / "wip tasks" → FROM Task_Allocation__c
+"sub-task" / "subtask" / "sub task" / "subtasks"                → FROM Sub_Task__c
 
-FEW-SHOT EXAMPLES (Follow these SOQL templates):
-
-Example 1 — List Accounts:
-User: Show me the top 10 accounts by revenue
-SOQL: SELECT Id, Name, Industry, AnnualRevenue FROM Account WHERE AnnualRevenue != null ORDER BY AnnualRevenue DESC LIMIT 10
-
-Example 2 — Contact lookup:
-User: Find all contacts at Acme Corp
-SOQL: SELECT Id, FirstName, LastName, Email, Phone, Title FROM Contact WHERE Account.Name LIKE '%Acme%'
-
-Example 3 — Pipeline analysis:
-User: What is the total opportunity amount by stage?
-SOQL: SELECT StageName, COUNT(Id) OpportunityCount, SUM(Amount) TotalAmount FROM Opportunity GROUP BY StageName ORDER BY SUM(Amount) DESC
-
-Example 4 — Recent cases:
-User: Show me open high-priority cases from the last 30 days
-SOQL: SELECT CaseNumber, Subject, Status, Priority, CreatedDate, Account.Name FROM Case WHERE Priority = 'High' AND IsClosed = false AND CreatedDate = LAST_N_DAYS:30 ORDER BY CreatedDate DESC
-
-Example 5 — Lead conversion:
-User: How many leads were converted this year?
-SOQL: SELECT COUNT(Id) ConvertedCount FROM Lead WHERE IsConverted = true AND ConvertedDate = THIS_YEAR
-
-Example 6 — Relationship query:
-User: Show accounts with their contacts
-SOQL: SELECT Name, Industry, (SELECT FirstName, LastName, Email FROM Contacts) FROM Account LIMIT 10
-
-You MUST follow these rules:
-1. When asked about data, first check if you know the fields of the relevant Salesforce object. If unsure, use the `describe_object` tool to discover the exact field names.
-2. Formulate a correct SOQL query that is read-only (SELECT only).
-3. For text or name searches, use the `LIKE` operator with wildcards (e.g., `Name LIKE '%search_term%'`) unless the user requests exact match.
-4. **Do not truncate, alter, or auto-correct names, IDs, or values** provided by the user. Search for the exact terms they typed.
-5. Use the tool `execute_soql` to fetch the data from Salesforce.
-6. If the user wants a cross-object keyword search (not a structured query), use `search_records` with a SOSL query.
-7. After receiving the tool execution result, formulate your final answer.
-8. In your final response: 
-   - Provide a clear, natural language explanation of the results.
-   - If the results are structured data, include the exact SOQL query used inside a markdown code block labeled with `soql`.
-   - Summarize the data briefly. 
+NEVER use the standard "Task" object. NEVER write "FROM Task".
 """
 
 class LLMService:
@@ -163,7 +97,11 @@ class LLMService:
         context_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
             f"SALESFORCE SCHEMA DETAILS:\n{schema_context}\n\n"
-            f"{history_context}"
+            f"{history_context}\n"
+            "CRITICAL REMINDER FOR THIS ORG:\n"
+            "- NEVER use 'FROM Task' in SOQL. Standard Task table is not used for task tracking.\n"
+            "- For any task, sub-task, or status query, you must query custom objects 'Sub_Task__c' or 'Task_Allocation__c'.\n"
+            "- Filter user assignments using 'Resource__r.Name LIKE ...' (for Sub_Task__c) or 'Task_Resource__r.Name LIKE ...' (for Task_Allocation__c) instead of Owner.Name.\n\n"
             f"User Question: {user_message}"
         )
 
@@ -209,7 +147,17 @@ class LLMService:
             describe_obj = parsed.get("describe_object")
             if describe_obj:
                 logger.info(f"Gemini wants to describe object: {describe_obj}")
-                schema_result = await sf_mcp_client.execute_tool("describe_object", {"object_name": describe_obj})
+                if describe_obj.strip().lower() == "task":
+                    logger.info("Redirecting describe_object 'Task' to custom task objects.")
+                    schema_result_st = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Sub_Task__c"})
+                    schema_result_ta = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Task_Allocation__c"})
+                    schema_result = (
+                        "CRITICAL INFO: The standard 'Task' object is NOT used. You must query 'Sub_Task__c' or 'Task_Allocation__c'.\n"
+                        f"Sub_Task__c fields:\n{schema_result_st}\n\n"
+                        f"Task_Allocation__c fields:\n{schema_result_ta}"
+                    )
+                else:
+                    schema_result = await sf_mcp_client.execute_tool("describe_object", {"object_name": describe_obj})
                 
                 # Now re-prompt with the schema info to generate the actual SOQL
                 followup_prompt = (
@@ -268,6 +216,32 @@ class LLMService:
             
             # Handle SOQL query
             soql = parsed.get("soql")
+            if soql:
+                import re
+                if re.search(r"\bFROM\s+Task\b", soql, re.IGNORECASE):
+                    logger.warning("SOQL query attempted to query standard 'Task' table. Re-prompting for correction...")
+                    followup_prompt = (
+                        f"{prompt}\n\n"
+                        f"ERROR: Your previous query '{soql}' queried the standard 'Task' object.\n"
+                        "CRITICAL REMINDER: The standard 'Task' object is NOT used and does NOT contain task allocation fields.\n"
+                        "You MUST query either 'Sub_Task__c' or 'Task_Allocation__c' instead. Do NOT use standard fields like Owner.Name or Subject. Use Resource__r.Name and Status__c (for Sub_Task__c) or Task_Resource__r.Name and Task_Status__c (for Task_Allocation__c).\n\n"
+                        "Now generate the correct SOQL query. Output a JSON object:\n"
+                        '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
+                        "Output ONLY the JSON object."
+                    )
+                    response2 = self.gemini_model.generate_content(
+                        followup_prompt,
+                        generation_config={"response_mime_type": "application/json"}
+                    )
+                    response_text2 = response2.text.strip()
+                    if response_text2.startswith("```json"):
+                        response_text2 = response_text2.replace("```json", "", 1)
+                    if response_text2.endswith("```"):
+                        response_text2 = response_text2[:-3]
+                    response_text2 = response_text2.strip()
+                    parsed = json.loads(response_text2)
+                    soql = parsed.get("soql")
+
             if soql:
                 logger.info(f"Gemini suggested SOQL: {soql}")
                 # Execute the SOQL via MCP tool
@@ -361,7 +335,17 @@ class LLMService:
             describe_obj = parsed.get("describe_object")
             if describe_obj:
                 logger.info(f"Ollama wants to describe object: {describe_obj}")
-                schema_result = await sf_mcp_client.execute_tool("describe_object", {"object_name": describe_obj})
+                if describe_obj.strip().lower() == "task":
+                    logger.info("Redirecting describe_object 'Task' to custom task objects.")
+                    schema_result_st = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Sub_Task__c"})
+                    schema_result_ta = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Task_Allocation__c"})
+                    schema_result = (
+                        "CRITICAL INFO: The standard 'Task' object is NOT used. You must query 'Sub_Task__c' or 'Task_Allocation__c'.\n"
+                        f"Sub_Task__c fields:\n{schema_result_st}\n\n"
+                        f"Task_Allocation__c fields:\n{schema_result_ta}"
+                    )
+                else:
+                    schema_result = await sf_mcp_client.execute_tool("describe_object", {"object_name": describe_obj})
                 
                 followup_prompt = (
                     f"{prompt}\n\n"
@@ -424,6 +408,34 @@ class LLMService:
             
             # Handle SOQL query
             soql = parsed.get("soql")
+            if soql:
+                import re
+                if re.search(r"\bFROM\s+Task\b", soql, re.IGNORECASE):
+                    logger.warning("SOQL query attempted to query standard 'Task' table. Re-prompting for correction...")
+                    followup_prompt = (
+                        f"{prompt}\n\n"
+                        f"ERROR: Your previous query '{soql}' queried the standard 'Task' object.\n"
+                        "CRITICAL REMINDER: The standard 'Task' object is NOT used and does NOT contain task allocation fields.\n"
+                        "You MUST query either 'Sub_Task__c' or 'Task_Allocation__c' instead. Do NOT use standard fields like Owner.Name or Subject. Use Resource__r.Name and Status__c (for Sub_Task__c) or Task_Resource__r.Name and Task_Status__c (for Task_Allocation__c).\n\n"
+                        "Now generate the correct SOQL query. Output a JSON object:\n"
+                        '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
+                        "Output ONLY the JSON object."
+                    )
+                    response2 = ollama.chat(
+                        model=settings.OLLAMA_MODEL,
+                        messages=[{"role": "user", "content": followup_prompt}],
+                        format="json",
+                        options={"temperature": 0.1}
+                    )
+                    response_text2 = response2['message']['content'].strip()
+                    if response_text2.startswith("```json"):
+                        response_text2 = response_text2.replace("```json", "", 1)
+                    if response_text2.endswith("```"):
+                        response_text2 = response_text2[:-3]
+                    response_text2 = response_text2.strip()
+                    parsed = json.loads(response_text2)
+                    soql = parsed.get("soql")
+
             if soql:
                 logger.info(f"Ollama suggested SOQL: {soql}")
                 sf_results = await sf_mcp_client.execute_tool("execute_soql", {"soql_query": soql})

@@ -83,11 +83,9 @@ def is_soql_safe(query: str) -> bool:
 
 # --- Default Salesforce Objects for schema overview ---
 DEFAULT_OBJECTS = [
-    "Account", "Contact", "Opportunity", "Lead", "Case",
-    "Task", "Event", "Campaign", "CampaignMember",
-    "Product2", "PricebookEntry", "OpportunityLineItem",
-    "User", "Contract", "Order", "OrderItem", "Asset"
+    "Sub_Task__c", "Task_Allocation__c"
 ]
+
 
 
 # --- MCP Tools ---
@@ -203,11 +201,15 @@ def execute_soql(soql_query: str) -> str:
     try:
         sf = get_sf_connection()
 
-        # Add a default LIMIT if none is present to prevent huge result sets
+        # Add a default LIMIT if none is present to prevent huge result sets.
+        # Skip this for overall non-grouped aggregate queries (e.g. COUNT(Id)) which SOQL forbids from using LIMIT.
         limit_match = re.search(r"\bLIMIT\b\s+\d+", soql_query, re.IGNORECASE)
         executed_query = soql_query.strip().rstrip(";")
         if not limit_match:
-            executed_query += " LIMIT 200"
+            is_aggregate = re.search(r"\b(COUNT\s*\(\s*\)|COUNT\s*\(|SUM\s*\(|AVG\s*\(|MIN\s*\(|MAX\s*\()", soql_query, re.IGNORECASE)
+            is_grouped = re.search(r"\bGROUP\s+BY\b", soql_query, re.IGNORECASE)
+            if not (is_aggregate and not is_grouped):
+                executed_query += " LIMIT 200"
 
         logger.info(f"Executing SOQL: {executed_query}")
         result = sf.query(executed_query)
