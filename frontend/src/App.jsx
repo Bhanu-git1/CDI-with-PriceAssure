@@ -15,7 +15,7 @@ export default function App() {
   const [queryLoading, setQueryLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState('connecting'); // online | offline | connecting
   const [activeModel, setActiveModel] = useState('');
-  
+
   // Dynamic API endpoint configuration
   const [apiEndpoint, setApiEndpoint] = useState(getInitialEndpoint());
   const [showSettings, setShowSettings] = useState(false);
@@ -122,12 +122,12 @@ export default function App() {
           <div className="chat-header-title">
             <div className="header-logo">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="url(#sfGrad)"/>
-                <path d="M8 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="url(#sfGrad)" />
+                <path d="M8 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 <defs>
                   <linearGradient id="sfGrad" x1="2" y1="2" x2="22" y2="22">
-                    <stop offset="0%" stopColor="#00A1E0"/>
-                    <stop offset="100%" stopColor="#032D60"/>
+                    <stop offset="0%" stopColor="#00A1E0" />
+                    <stop offset="100%" stopColor="#032D60" />
                   </linearGradient>
                 </defs>
               </svg>
@@ -141,7 +141,7 @@ export default function App() {
               boxShadow: `0 0 8px ${serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)'}`
             }} />
             <span style={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{serverStatus}</span>
-            <button 
+            <button
               onClick={() => setShowSettings(!showSettings)}
               style={{
                 background: 'transparent',
@@ -174,8 +174,8 @@ export default function App() {
             animation: 'slideDown 0.2s ease'
           }}>
             <span style={{ fontWeight: '600', color: 'var(--text-secondary)' }}>Connection Endpoint:</span>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={tempEndpoint}
               onChange={(e) => setTempEndpoint(e.target.value)}
               placeholder="e.g. https://abc123.ngrok-free.app or http://localhost:8000"
@@ -188,7 +188,7 @@ export default function App() {
                 fontSize: '0.85rem'
               }}
             />
-            <button 
+            <button
               onClick={() => {
                 const cleanUrl = tempEndpoint.trim().replace(/\/$/, ""); // trim trailing slash
                 localStorage.setItem('__sf_chat_api_endpoint__', cleanUrl);
@@ -208,7 +208,7 @@ export default function App() {
             >
               Save
             </button>
-            <button 
+            <button
               onClick={() => {
                 setTempEndpoint(apiEndpoint);
                 setShowSettings(false);
@@ -231,49 +231,49 @@ export default function App() {
             <div className="empty-state">
               <div className="empty-state-icon">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="url(#emptyGrad)" strokeWidth="1.5"/>
-                  <path d="M8 12l2 2 4-4" stroke="url(#emptyGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx="12" cy="12" r="10" stroke="url(#emptyGrad)" strokeWidth="1.5" />
+                  <path d="M8 12l2 2 4-4" stroke="url(#emptyGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   <defs>
                     <linearGradient id="emptyGrad" x1="4" y1="4" x2="20" y2="20">
-                      <stop offset="0%" stopColor="#00A1E0"/>
-                      <stop offset="100%" stopColor="#1B96FF"/>
+                      <stop offset="0%" stopColor="#00A1E0" />
+                      <stop offset="100%" stopColor="#1B96FF" />
                     </linearGradient>
                   </defs>
                 </svg>
               </div>
-              <h3>Salesforce Intelligence Hub ☁️</h3>
+              <h3>Salesforce Task Tracking Assistant ☁️</h3>
               <p>
-                Ask questions about your CRM data in plain English. The AI will translate your question into a read-only SOQL query, execute it against your Salesforce org via the Model Context Protocol (MCP), and display results with charts and tables!
+                Ask questions about task allocations and sub-tasks in plain English. The AI will translate your question into a read-only SOQL query, execute it against your custom Salesforce objects, and display results in real-time!
               </p>
 
               <div style={{ width: '100%', marginTop: '24px' }}>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: '600' }}>
-                  TRY ASKING ABOUT YOUR SALESFORCE DATA:
+                  TRY ASKING ABOUT YOUR TASK AND SUB-TASK DATA:
                 </p>
                 <div className="suggested-queries">
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("Show me the top 10 accounts by annual revenue")}
+                    onClick={() => handleSendMessage("give completed task list of Today")}
                   >
-                    🏢 Top 10 accounts by annual revenue
+                    📋 Completed tasks of Today
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("What is the total opportunity amount by stage?")}
+                    onClick={() => handleSendMessage("give todays all wip sub task list")}
                   >
-                    📊 Opportunity pipeline by stage
+                    🔥 Today's WIP sub-tasks
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("Show me open high-priority cases from the last 30 days")}
+                    onClick={() => handleSendMessage("how many task allocations have a status of WIP?")}
                   >
-                    🎫 Recent high-priority open cases
+                    📈 WIP task allocations count
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("How many leads were converted this year?")}
+                    onClick={() => handleSendMessage("show sub-tasks in completed status")}
                   >
-                    🎯 Lead conversions this year
+                    ⏳ Completed sub-tasks
                   </button>
                 </div>
               </div>
@@ -308,7 +308,7 @@ export default function App() {
           <div className="input-container">
             <input
               type="text"
-              placeholder="Ask about Accounts, Contacts, Opportunities, Cases... (e.g., 'Show top deals closing this month')"
+              placeholder="Ask about Tasks, Sub-Tasks, Task Statuses... (e.g., 'give completed task list of Ijaz')"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyPress}
