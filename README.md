@@ -70,11 +70,15 @@ The backend is a FastAPI server that manages direct sandboxed code execution aga
    ```env
    MYSQL_HOST=localhost
    MYSQL_PORT=3306
-   MYSQL_USER=mcp_readonly
-   MYSQL_PASSWORD=mcp_secure_pass123
-   MYSQL_DATABASE=mcp_poc_db
+   MYSQL_USER=your_mysql_username
+   MYSQL_PASSWORD=your_mysql_password
+   MYSQL_DATABASE=accelerator
 
-   GEMINI_API_KEY=your_gemini_api_key_here
+   GROQ_API_KEY=gsk_your_groq_api_key_here
+   GROQ_MODEL=llama-3.3-70b-versatile
+
+   # Optional Cloud or Local Fallbacks
+   GEMINI_API_KEY=
    OLLAMA_MODEL=qwen2.5-coder:7b
    OLLAMA_HOST=http://localhost:11434
 
