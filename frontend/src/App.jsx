@@ -5,7 +5,7 @@ import './App.css';
 // Default endpoint fallback
 const getInitialEndpoint = () => {
   const envUrl = import.meta.env.VITE_API_URL;
-  const savedUrl = localStorage.getItem('__sf_chat_api_endpoint__');
+  const savedUrl = localStorage.getItem('__mysql_chat_api_endpoint__') || localStorage.getItem('__sf_chat_api_endpoint__');
   return savedUrl || envUrl || 'http://localhost:8000';
 };
 
@@ -98,7 +98,7 @@ export default function App() {
       console.error("Chat Error:", error);
       setMessages(prev => [...prev, {
         sender: 'assistant',
-        text: "Could not retrieve Salesforce data.",
+        text: "Could not retrieve database data.",
         error: error.message
       }]);
     } finally {
@@ -122,16 +122,16 @@ export default function App() {
           <div className="chat-header-title">
             <div className="header-logo">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="url(#sfGrad)" />
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="url(#dbGrad)" />
                 <path d="M8 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 <defs>
-                  <linearGradient id="sfGrad" x1="2" y1="2" x2="22" y2="22">
+                  <linearGradient id="dbGrad" x1="2" y1="2" x2="22" y2="22">
                     <stop offset="0%" stopColor="#00A1E0" />
                     <stop offset="100%" stopColor="#032D60" />
                   </linearGradient>
                 </defs>
               </svg>
-              <h1>Salesforce Data Assistant</h1>
+              <h1>MySQL Data Assistant</h1>
             </div>
           </div>
           <div className="chat-header-status">
@@ -191,7 +191,7 @@ export default function App() {
             <button
               onClick={() => {
                 const cleanUrl = tempEndpoint.trim().replace(/\/$/, ""); // trim trailing slash
-                localStorage.setItem('__sf_chat_api_endpoint__', cleanUrl);
+                localStorage.setItem('__mysql_chat_api_endpoint__', cleanUrl);
                 setApiEndpoint(cleanUrl);
                 setTempEndpoint(cleanUrl);
                 setShowSettings(false);
@@ -241,39 +241,39 @@ export default function App() {
                   </defs>
                 </svg>
               </div>
-              <h3>Salesforce Task Tracking Assistant ☁️</h3>
+              <h3>MySQL Database Assistant 🗄️</h3>
               <p>
-                Ask questions about task allocations and sub-tasks in plain English. The AI will translate your question into a read-only SOQL query, execute it against your custom Salesforce objects, and display results in real-time!
+                Ask questions about users, products, orders, and order items in plain English. The AI will translate your question into a SQL query, execute it against your MySQL database, and display results in real-time!
               </p>
 
               <div style={{ width: '100%', marginTop: '24px' }}>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: '600' }}>
-                  TRY ASKING ABOUT YOUR TASK AND SUB-TASK DATA:
+                  TRY ASKING ABOUT YOUR DATABASE:
                 </p>
                 <div className="suggested-queries">
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("give completed task list of Today")}
+                    onClick={() => handleSendMessage("show all active users")}
                   >
-                    📋 Completed tasks of Today
+                    👤 Show all active users
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("give todays all wip sub task list")}
+                    onClick={() => handleSendMessage("list all shipped orders with customer names")}
                   >
-                    🔥 Today's WIP sub-tasks
+                    📦 Shipped orders with customer names
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("how many task allocations have a status of WIP?")}
+                    onClick={() => handleSendMessage("what are the top selling products by quantity?")}
                   >
-                    📈 WIP task allocations count
+                    📈 Top selling products by quantity
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("show sub-tasks in completed status")}
+                    onClick={() => handleSendMessage("show total revenue per user")}
                   >
-                    ⏳ Completed sub-tasks
+                    💰 Total revenue per user
                   </button>
                 </div>
               </div>
@@ -294,7 +294,7 @@ export default function App() {
                   <span></span>
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  AI generating SOQL & querying Salesforce via MCP...
+                  AI generating code & querying MySQL...
                 </div>
               </div>
             </div>
@@ -308,7 +308,7 @@ export default function App() {
           <div className="input-container">
             <input
               type="text"
-              placeholder="Ask about Tasks, Sub-Tasks, Task Statuses... (e.g., 'give completed task list of Ijaz')"
+              placeholder="Ask about Users, Products, Orders... (e.g., 'show all shipped orders')"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyPress}

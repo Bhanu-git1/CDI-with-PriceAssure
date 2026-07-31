@@ -10,10 +10,7 @@ export default function MessageBubble({ message }) {
 
   const hasData = data && Array.isArray(data) && data.length > 0;
 
-  // Detect if the query is SOQL or SOSL
-  const queryLabel = sql
-    ? (sql.trim().toUpperCase().startsWith('FIND') ? 'SOSL Search' : 'SOQL Query')
-    : 'Query';
+  const queryLabel = 'SQL Query';
 
   const copySqlToClipboard = () => {
     if (!sql) return;
@@ -64,7 +61,7 @@ export default function MessageBubble({ message }) {
           <div style={{ whiteSpace: 'pre-line' }}>{text}</div>
         )}
 
-        {/* Display SOQL/SOSL block under explanation if available */}
+        {/* Display SQL block under explanation if available */}
         {sender === 'assistant' && sql && (
           <div style={{ marginTop: '12px' }}>
             <button

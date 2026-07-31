@@ -3,23 +3,23 @@ import React, { useMemo, useState } from 'react';
 export default function SchemaExplorer({ schemaText, loading }) {
   const [expandedObject, setExpandedObject] = useState(null);
 
-  // Parse Salesforce schema string into structured objects
-  const sfObjects = useMemo(() => {
+  // Parse MySQL schema string into structured table objects
+  const dbTables = useMemo(() => {
     if (!schemaText) return [];
     
-    const parsedObjects = [];
+    const parsedTables = [];
     const lines = schemaText.split('\n');
     
     for (const line of lines) {
-      // Match Salesforce schema format:
-      // Object 'ObjectName' (Label: 'Label'): [field1 (type), field2 (type)]
-      const match = line.match(/^Object '(.+?)' \(Label: '(.+?)'\): \[(.+?)\]$/);
+      // Match MySQL schema format:
+      // Table 'table_name' (N rows): [col1 (type), col2 (type)]
+      const match = line.match(/^Table '(.+?)' \((\d+) rows?\): \[(.+?)\]$/);
       if (match) {
-        const objectName = match[1];
-        const objectLabel = match[2];
+        const tableName = match[1];
+        const rowCount = parseInt(match[2], 10);
         const fieldsRaw = match[3];
         
-        // Parse fields e.g. "Id (id), Name (string), Amount (currency)"
+        // Parse fields e.g. "id (int), name (varchar(100)), price (decimal(10,2))"
         const fields = fieldsRaw.split(', ').map(fieldStr => {
           // Handle "... +N more fields" suffix
           if (fieldStr.startsWith('...')) {
@@ -32,37 +32,34 @@ export default function SchemaExplorer({ schemaText, loading }) {
           return { name: fieldStr, type: 'unknown' };
         });
         
-        parsedObjects.push({
-          name: objectName,
-          label: objectLabel,
+        parsedTables.push({
+          name: tableName,
+          label: `${rowCount} rows`,
           fields,
-          isCustom: objectName.endsWith('__c')
         });
       }
     }
     
-    // Sort: standard objects first, then custom objects, both alphabetically
-    return parsedObjects.sort((a, b) => {
-      if (a.isCustom !== b.isCustom) return a.isCustom ? 1 : -1;
-      return a.name.localeCompare(b.name);
-    });
+    return parsedTables.sort((a, b) => a.name.localeCompare(b.name));
   }, [schemaText]);
 
-  const toggleExpand = (objectName) => {
-    if (expandedObject === objectName) {
+  const toggleExpand = (tableName) => {
+    if (expandedObject === tableName) {
       setExpandedObject(null);
     } else {
-      setExpandedObject(objectName);
+      setExpandedObject(tableName);
     }
   };
 
-  // Map Salesforce field types to color-coded badges
+  // Map MySQL column types to color-coded badges
   const getTypeColor = (type) => {
-    if (type.startsWith('reference')) return '#e879f9'; // purple for lookups
-    if (['currency', 'double', 'int', 'percent'].includes(type)) return '#34d399'; // green for numbers
-    if (['date', 'datetime'].includes(type)) return '#fbbf24'; // amber for dates
-    if (['boolean'].includes(type)) return '#60a5fa'; // blue for booleans
-    if (type.startsWith('picklist')) return '#fb923c'; // orange for picklists
+    const lower = type.toLowerCase();
+    if (lower.startsWith('int') || lower.startsWith('bigint') || lower.startsWith('smallint') || lower.startsWith('tinyint')) return '#34d399'; // green for integers
+    if (lower.startsWith('decimal') || lower.startsWith('float') || lower.startsWith('double')) return '#34d399'; // green for numbers
+    if (lower.startsWith('date') || lower.startsWith('timestamp') || lower.startsWith('datetime')) return '#fbbf24'; // amber for dates
+    if (lower.startsWith('bool') || lower.startsWith('tinyint(1)')) return '#60a5fa'; // blue for booleans
+    if (lower.startsWith('enum') || lower.startsWith('set')) return '#fb923c'; // orange for enums
+    if (lower.startsWith('varchar') || lower.startsWith('text') || lower.startsWith('char')) return '#e879f9'; // purple for strings
     return 'var(--accent-secondary)'; // default
   };
 
@@ -73,20 +70,20 @@ export default function SchemaExplorer({ schemaText, loading }) {
           <circle cx="12" cy="12" r="10"/>
           <path d="M8 12l2 2 4-4"/>
         </svg>
-        <h2>SALESFORCE OBJECTS</h2>
+        <h2>DATABASE TABLES</h2>
       </div>
       
       <div className="schema-list">
         {loading ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
-            Reading Salesforce Schema...
+            Reading MySQL Schema...
           </div>
-        ) : sfObjects.length === 0 ? (
+        ) : dbTables.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
-            No objects discovered. Check Salesforce connection.
+            No tables discovered. Check MySQL connection.
           </div>
         ) : (
-          sfObjects.map((obj) => {
+          dbTables.map((obj) => {
             const isExpanded = expandedObject === obj.name;
             return (
               <div key={obj.name} className="schema-item">
@@ -95,7 +92,7 @@ export default function SchemaExplorer({ schemaText, loading }) {
                   onClick={() => toggleExpand(obj.name)}
                 >
                   <span>
-                    {obj.isCustom ? '🔧' : '☁️'} {obj.name}
+                    🗃️ {obj.name}
                     <span style={{ fontSize: '0.7rem', opacity: 0.5, marginLeft: '6px' }}>
                       {obj.label}
                     </span>

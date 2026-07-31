@@ -1,35 +1,44 @@
-# Salesforce MCP Chat Assistant (Standalone Architecture)
+# MySQL DCE Chat Assistant (Standalone Architecture)
 
-This workspace contains a standalone React Chat UI that communicates with a FastAPI backend server. The backend leverages the **Model Context Protocol (MCP)** to securely retrieve data from your Salesforce CRM using an LLM (Gemini or local Ollama) to translate natural language into read-only SOQL queries.
+This workspace contains a standalone React Chat UI that communicates with a FastAPI backend server. The backend leverages **Dynamic Code Execution (DCE)** to securely retrieve data from a **MySQL database** using an LLM (Gemini or local Ollama) to translate natural language into SQL queries executed within a restricted Python sandbox.
 
 ---
 
 ## Prerequisites
 
-Before starting, ensure your team has the following installed:
+Before starting, ensure you have the following installed:
 
-1. **Python 3.10+** (Ensure it is added to your system `PATH`)
-2. **Node.js (v18+) & npm**
-3. **A Salesforce account** (Developer Edition or Sandbox recommended) with API access.
+1. **MySQL Server** (v8.0+ recommended)
+2. **Python 3.10+** (Ensure it is added to your system `PATH`)
+3. **Node.js (v18+) & npm**
 4. **LLM Provider:**
-   - **Option A (Recommended):** A Google Gemini API Key.
-   - **Option B (Local):** [Ollama](https://ollama.com/) running locally with the `qwen2.5-coder:7b` model pulled (`ollama pull qwen2.5-coder:7b`).
+   - **Option A (Ultra-Fast Free Cloud):** [Groq API](https://console.groq.com/keys) with `llama-3.3-70b-versatile` (Recommended).
+   - **Option B (Cloud):** A Google Gemini API Key.
+   - **Option C (Local):** [Ollama](https://ollama.com/) running locally with the `qwen2.5-coder:7b` model pulled (`ollama pull qwen2.5-coder:7b`).
 
 ---
 
 ## Quick Start Guide
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/Ijaz-z/MCP-Server---Salesforce.git
-cd MCP-Server---Salesforce
+### 1. Database Setup (MySQL)
+
+Initialize the database schema and sample data using the provided SQL script:
+
+```powershell
+# In PowerShell:
+Get-Content sql/setup.sql | mysql -u root -p
+
+# Or in CMD / Bash:
+mysql -u root -p < sql/setup.sql
 ```
+
+*(This creates the `mcp_poc_db` database, populates sample tables (`users`, `products`, `orders`, `order_items`), and sets up a read-only user `mcp_readonly` with password `mcp_secure_pass123`)*
 
 ---
 
 ### 2. Backend Setup & Run
 
-The backend is a FastAPI server that manages the Salesforce MCP subprocess client.
+The backend is a FastAPI server that manages direct sandboxed code execution against MySQL.
 
 1. **Navigate to the backend directory:**
    ```bash
@@ -52,31 +61,32 @@ The backend is a FastAPI server that manages the Salesforce MCP subprocess clien
      ```
 
 4. **Install Python dependencies:**
-   *Note: Always use `python -m pip` to ensure installation into the correct active environment.*
    ```bash
    python -m pip install -r requirements.txt
    ```
 
 5. **Configure Environment Variables:**
-   Copy the example environment file:
-   ```bash
-   cp .env.example .env
+   The `.env` file is pre-configured with default MySQL settings:
+   ```env
+   MYSQL_HOST=localhost
+   MYSQL_PORT=3306
+   MYSQL_USER=mcp_readonly
+   MYSQL_PASSWORD=mcp_secure_pass123
+   MYSQL_DATABASE=mcp_poc_db
+
+   GEMINI_API_KEY=your_gemini_api_key_here
+   OLLAMA_MODEL=qwen2.5-coder:7b
+   OLLAMA_HOST=http://localhost:11434
+
+   PORT=8000
+   HOST=0.0.0.0
    ```
-   Open `.env` and configure:
-   - **Salesforce Credentials:**
-     - `SF_USERNAME`: Your Salesforce login email.
-     - `SF_PASSWORD`: Your Salesforce account password.
-     - `SF_SECURITY_TOKEN`: Your Salesforce Security Token (Reset this in Salesforce under *Settings -> Reset My Security Token*).
-     - `SF_DOMAIN`: Set to `login` (Production/Dev org) or `test` (Sandbox).
-   - **LLM Settings:**
-     - If using Gemini, paste your key into `GEMINI_API_KEY`.
-     - If using local Ollama, leave `GEMINI_API_KEY` blank, ensure `OLLAMA_HOST=http://localhost:11434` is correct, and run `ollama serve`.
 
 6. **Start the Backend:**
    ```bash
-   uvicorn app.main:app --reload --port 8000
+   python -m app.main
    ```
-   *Verify that you see `Successfully connected to MCP Salesforce server.` in the terminal logs.*
+   *Verify that you see `MySQL connection verified successfully (DCE).` in the terminal logs.*
 
 ---
 
@@ -94,13 +104,7 @@ The frontend is a Vite + React application.
    npm install
    ```
 
-3. **Configure Environment Variables:**
-   Create a file named `.env` in the `frontend` directory:
-   ```env
-   VITE_API_URL=http://localhost:8000
-   ```
-
-4. **Start the Frontend Dev Server:**
+3. **Start the Frontend Dev Server:**
    ```bash
    npm run dev
    ```
@@ -108,38 +112,77 @@ The frontend is a Vite + React application.
 
 ---
 
-## Testing the Application
+## How to Test the Application
+
+### Method 1: Interactive Web UI (Recommended)
 
 1. Open [http://localhost:3000](http://localhost:3000) in your browser.
-2. Check the top-right header status dot:
-   - **Green (Online):** App connected successfully to backend.
-   - **Red (Offline):** Check if backend is running on port `8000`.
-3. Try typing a query into the chat input:
-   - *Show me the top 5 accounts by annual revenue*
-   - *Find all contacts belonging to Dickenson plc*
-   - *What is the total opportunity amount by stage?*
-4. The AI will translate the prompt into SOQL, run it via the Salesforce MCP client, and present the results in tabular or chart format.
+2. Verify top-right status dot is **Green (Online)**.
+3. Try asking sample natural language questions in the chat input:
+   - `Show all active users`
+   - `List all shipped orders with customer names`
+   - `What are the top selling products by quantity?`
+   - `Show total revenue per user`
+4. Use the response tabs:
+   - **💬 Answer:** Natural language summary generated by AI
+   - **📊 Table View:** Tabular rendering of database records
+   - **📈 Bar Chart:** Auto-visualized chart for numerical data
+   - **Show Generated SQL Query:** View and copy the generated read-only SQL query
+
+### Method 2: Command Line Unit Tests
+
+To test the sandboxed execution engine and validator locally:
+
+```bash
+cd backend
+python -m unittest test_dce.py
+```
+
+### Method 3: Scripted API Test
+
+To test the API endpoint directly:
+
+```bash
+cd backend
+python test_api.py
+```
+
+### Method 4: Schema Inspector
+
+To inspect MySQL tables and schemas directly from Python:
+
+```bash
+cd backend
+python inspect_db.py
+```
 
 ---
 
-## Folder Structure
+## Project Structure
 
 ```
-MCP-Server---Salesforce/
+DCE-Server---MySQL/
 ├── backend/
 │   ├── app/
-│   │   ├── config.py         # Config loader
-│   │   ├── llm_service.py    # LLM & prompt orchestration
-│   │   ├── mcp_client.py     # Stdio client connecting to MCP server
-│   │   └── main.py           # FastAPI entrypoint
-│   ├── mcp_server/
-│   │   └── salesforce_server.py # FastMCP Salesforce server script
-│   ├── .env.example          # Template for backend settings
-│   └── requirements.txt      # Python dependencies
+│   │   ├── config.py            # Pydantic settings loader
+│   │   ├── llm_service.py       # LLM prompt & MySQL query orchestration
+│   │   ├── main.py              # FastAPI entrypoint & server setup
+│   │   └── services/
+│   │       ├── __init__.py      # Module exports
+│   │       ├── mysql_service.py # MySQL connection pooling & direct data operations
+│   │       └── code_executor.py # Sandboxed Python execution environment
+│   ├── inspect_db.py            # MySQL schema inspector script
+│   ├── test_api.py              # API test script
+│   ├── test_dce.py              # Unit tests for code executor sandbox
+│   ├── .env                     # Backend configuration settings
+│   ├── .env.example             # Backend environment template
+│   └── requirements.txt         # Python dependencies
 ├── frontend/
-│   ├── src/                  # React source files (UI components)
-│   ├── .env                  # Frontend environment settings (API URL)
-│   ├── index.html            # Entry HTML
-│   └── vite.config.js        # Vite build tool config
-└── README.md                 # This guide!
+│   ├── src/                     # React source components & styles
+│   ├── .env                     # Frontend API URL configuration
+│   ├── index.html               # Web entry point
+│   └── vite.config.js           # Vite development server configuration
+├── sql/
+│   └── setup.sql                # MySQL schema creation and seed data
+└── README.md                    # This documentation guide
 ```

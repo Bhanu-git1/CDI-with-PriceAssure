@@ -144,7 +144,7 @@
   color: var(--text-secondary);
 }
 
-.sf-user-badge {
+.db-user-badge {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -270,7 +270,7 @@
   border-bottom-left-radius: 2px;
 }
 
-/* Structured Output (SOQL & Data Visualizer) */
+/* Structured Output (SQL & Data Visualizer) */
 .sql-container {
   margin-top: 14px;
   border-radius: 8px;

@@ -1,16 +1,16 @@
-/* Salesforce-safe font stack — no external font loading (CSP compliant) */
+/* Application font stack */
 :root {
-  --bg-primary: #f4f6f9;          /* Salesforce-inspired light gray */
+  --bg-primary: #f4f6f9;          /* Light gray background */
   --bg-secondary: #ffffff;        /* Pure white for chat blocks/inputs */
   --bg-tertiary: #eef1f6;         /* Very light gray for panels/visualizations */
   
-  --accent-primary: #0176d3;      /* Salesforce Blue */
-  --accent-secondary: #1b96ff;    /* Salesforce Light Blue */
+  --accent-primary: #0176d3;      /* Primary Blue */
+  --accent-secondary: #1b96ff;    /* Light Blue */
   --accent-gradient: linear-gradient(135deg, #032d60 0%, #0176d3 50%, #1b96ff 100%);
   
   --text-primary: #181818;        /* Dark text for readability */
   --text-secondary: #444444;      /* Medium text for secondary */
-  --text-muted: #706e6b;          /* Salesforce muted text */
+  --text-muted: #706e6b;          /* Muted text */
   
   --border-color: rgba(0, 0, 0, 0.08); /* Soft light border */
   --border-focus: rgba(1, 118, 211, 0.4);
@@ -22,9 +22,9 @@
   /* Premium Google Fonts stack (Outfit for headings/UI, Inter fallback) */
   --font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   
-  --status-success: #2e844a;      /* Salesforce success green */
-  --status-warning: #fe9339;      /* Salesforce warning amber */
-  --status-danger: #ea001e;       /* Salesforce error red */
+  --status-success: #2e844a;      /* Success green */
+  --status-warning: #fe9339;      /* Warning amber */
+  --status-danger: #ea001e;       /* Error red */
 }
 
 * {
@@ -41,7 +41,7 @@ body, :host {
   -webkit-font-smoothing: antialiased;
 }
 
-/* When running standalone (not inside Salesforce) */
+/* When running standalone */
 body {
   height: 100vh;
   width: 100vw;

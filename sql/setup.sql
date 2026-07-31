@@ -3,101 +3,142 @@ CREATE DATABASE IF NOT EXISTS mcp_poc_db;
 USE mcp_poc_db;
 
 -- 2. Drop existing tables if they exist (clean slate)
+DROP TABLE IF EXISTS fatigue_score;
+DROP TABLE IF EXISTS hcp_engagement_logs;
+DROP TABLE IF EXISTS Compliance_Table;
+DROP TABLE IF EXISTS leakage_history;
+DROP TABLE IF EXISTS Reverse_Claims;
+DROP TABLE IF EXISTS Leakage_Activity;
+
+-- Also drop e-commerce tables if recreating
 DROP TABLE IF EXISTS order_items;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS users;
 
--- 3. Create Users Table
-CREATE TABLE users (
+-- ----------------------------------------------------
+-- 3. Create Commercial Command Centre Tables
+-- ----------------------------------------------------
+
+-- Table 1: Leakage_Activity
+CREATE TABLE Leakage_Activity (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(100) UNIQUE NOT NULL,
-    status VARCHAR(20) DEFAULT 'active',
-    signup_date DATE NOT NULL
+    BrandName VARCHAR(100) NOT NULL,
+    Pharmacy_ID VARCHAR(50) NOT NULL,
+    zip_code VARCHAR(15) NOT NULL,
+    Prescriber_NPI VARCHAR(20) NOT NULL,
+    HCP_Name VARCHAR(100) NOT NULL,
+    State VARCHAR(10) NOT NULL,
+    Pharmacy_Rejections INT DEFAULT 0,
+    Total_Brand_Rejections INT DEFAULT 0,
+    Leakage_Percentage DECIMAL(5, 2) DEFAULT 0.00,
+    generic_name VARCHAR(100),
+    manufacturer VARCHAR(100),
+    productid VARCHAR(50),
+    Processed_TimeStamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. Create Products Table
-CREATE TABLE products (
+-- Table 2: Reverse_Claims
+CREATE TABLE Reverse_Claims (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(150) NOT NULL,
-    category VARCHAR(50) NOT NULL,
-    price DECIMAL(10, 2) NOT NULL,
-    stock INT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    Transaction_ID VARCHAR(50) NOT NULL,
+    Timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    Patient_Token VARCHAR(100) NOT NULL,
+    Prescriber_NPI VARCHAR(20) NOT NULL,
+    Pharmacy_ID VARCHAR(50) NOT NULL,
+    NDC_Code VARCHAR(30) NOT NULL,
+    Payer_BIN VARCHAR(30) NOT NULL,
+    Response_Status VARCHAR(20) NOT NULL,
+    Reject_Code VARCHAR(20),
+    Reject_Message TEXT,
+    Created_At TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Create Orders Table
-CREATE TABLE orders (
+-- Table 3: leakage_history
+CREATE TABLE leakage_history (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT,
-    order_date DATE NOT NULL,
-    total_amount DECIMAL(10, 2) NOT NULL,
-    status VARCHAR(30) DEFAULT 'Pending',
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    previous_value DECIMAL(10, 2),
+    new_value DECIMAL(10, 2) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 6. Create Order Items Table
-CREATE TABLE order_items (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    order_id INT,
-    product_id INT,
-    quantity INT NOT NULL,
-    unit_price DECIMAL(10, 2) NOT NULL,
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
-    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+-- Table 4: Compliance_Table
+CREATE TABLE Compliance_Table (
+    Patient_Token VARCHAR(100) PRIMARY KEY,
+    Payer_id VARCHAR(50) NOT NULL,
+    Payer_Type VARCHAR(50) NOT NULL,
+    Created_At TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 7. Seed Sample Data
-INSERT INTO users (name, email, status, signup_date) VALUES
-('John Doe', 'john.doe@example.com', 'active', '2026-01-15'),
-('Jane Smith', 'jane.smith@example.com', 'active', '2026-02-10'),
-('Bob Johnson', 'bob.johnson@example.com', 'inactive', '2026-03-01'),
-('Alice Brown', 'alice.brown@example.com', 'active', '2026-03-15'),
-('Charlie Wilson', 'charlie.w@example.com', 'active', '2026-04-20');
+-- Table 5: hcp_engagement_logs
+CREATE TABLE hcp_engagement_logs (
+    Log_ID INT AUTO_INCREMENT PRIMARY KEY,
+    HCP_ID VARCHAR(50) NOT NULL,
+    Engagement_Date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    Channel VARCHAR(50) NOT NULL,
+    Email_Sent INT DEFAULT 0,
+    Email_Opened INT DEFAULT 0,
+    Email_Clicked INT DEFAULT 0,
+    Webinar_Minutes INT DEFAULT 0,
+    Campaign_ID VARCHAR(50) NOT NULL
+);
 
-INSERT INTO products (name, category, price, stock) VALUES
-('Wireless Mouse', 'Electronics', 29.99, 150),
-('Mechanical Keyboard', 'Electronics', 89.99, 45),
-('HD Monitor 27"', 'Electronics', 199.99, 20),
-('Ergonomic Office Chair', 'Furniture', 249.99, 15),
-('Standing Desk', 'Furniture', 399.99, 10),
-('Coffee Mug', 'Kitchen', 12.50, 200),
-('Notebook A5', 'Stationery', 6.99, 500);
+-- Table 6: fatigue_score
+CREATE TABLE fatigue_score (
+    Fatigue_ID INT AUTO_INCREMENT PRIMARY KEY,
+    HCP_Name VARCHAR(100) NOT NULL,
+    Fatigue DECIMAL(5, 2) NOT NULL,
+    Product VARCHAR(100) NOT NULL,
+    Campaign_Name VARCHAR(100) NOT NULL,
+    Processed_TimeStamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-INSERT INTO orders (user_id, order_date, total_amount, status) VALUES
-(1, '2026-05-01', 119.98, 'Shipped'),
-(2, '2026-05-10', 212.49, 'Shipped'),
-(4, '2026-05-15', 399.99, 'Processing'),
-(1, '2026-06-01', 42.49, 'Delivered'),
-(3, '2026-06-12', 12.50, 'Cancelled'),
-(5, '2026-06-20', 289.97, 'Shipped');
+-- ----------------------------------------------------
+-- 4. Seed Sample Data
+-- ----------------------------------------------------
 
-INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES
-(1, 1, 1, 29.99),
-(1, 2, 1, 89.99),
-(2, 2, 1, 89.99),
-(2, 6, 1, 12.50),
-(2, 7, 1, 6.99),
-(2, 1, 3, 29.99), -- 3 Wireless Mice
-(3, 5, 1, 399.99),
-(4, 1, 1, 29.99),
-(4, 6, 1, 12.50),
-(5, 6, 1, 12.50),
-(6, 4, 1, 249.99),
-(6, 1, 1, 29.99),
-(6, 7, 1, 6.99);
+INSERT INTO Leakage_Activity (BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, HCP_Name, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage, generic_name, manufacturer, productid) VALUES
+('OncoShield', 'PHARM_101', '90210', 'NPI_11111', 'Dr. John Smith', 'CA', 12, 50, 24.00, 'onco_gen', 'PharmaCorp', 'PROD_01'),
+('OncoShield', 'PHARM_102', '90211', 'NPI_22222', 'Dr. Sarah Connor', 'CA', 8, 40, 20.00, 'onco_gen', 'PharmaCorp', 'PROD_01'),
+('CardioGuard', 'PHARM_103', '60601', 'NPI_33333', 'Dr. Robert Bruce', 'IL', 25, 80, 31.25, 'cardio_gen', 'HealthInc', 'PROD_02'),
+('ImmunoFlex', 'PHARM_104', '75001', 'NPI_44444', 'Dr. Emily Watson', 'TX', 15, 30, 50.00, 'immuno_gen', 'BioGen', 'PROD_03');
 
--- 8. Create Secure, Read-Only User for MCP Server
--- Feel free to adjust names/passwords to match your local setup
--- Note: Run these lines individually if your server requires specific host mapping (e.g. '%' instead of 'localhost')
+INSERT INTO Reverse_Claims (Transaction_ID, Patient_Token, Prescriber_NPI, Pharmacy_ID, NDC_Code, Payer_BIN, Response_Status, Reject_Code, Reject_Message) VALUES
+('TXN_9001', 'PAT_001', 'NPI_11111', 'PHARM_101', '12345-678-90', 'BIN_610014', 'REJECTED', '75', 'Prior Authorization Required'),
+('TXN_9002', 'PAT_002', 'NPI_22222', 'PHARM_102', '12345-678-90', 'BIN_610014', 'REJECTED', '70', 'Plan Limit Exceeded'),
+('TXN_9003', 'PAT_003', 'NPI_33333', 'PHARM_103', '98765-432-10', 'BIN_004336', 'REVERSED', '75', 'Prior Authorization Required');
+
+INSERT INTO leakage_history (previous_value, new_value, updated_by, updated_at) VALUES
+(15.00, 20.00, 'admin_user', '2026-07-01 10:00:00'),
+(20.00, 25.00, 'ops_lead', '2026-07-15 14:30:00'),
+(25.00, 30.00, 'compliance_mgr', '2026-07-28 09:15:00');
+
+INSERT INTO Compliance_Table (Patient_Token, Payer_id, Payer_Type) VALUES
+('PAT_001', 'PAYER_GOV_1', 'MEDICARE'),
+('PAT_002', 'PAYER_GOV_2', 'MEDICAID'),
+('PAT_003', 'PAYER_COMM_1', 'COMMERCIAL');
+
+INSERT INTO hcp_engagement_logs (HCP_ID, Channel, Email_Sent, Email_Opened, Email_Clicked, Webinar_Minutes, Campaign_ID) VALUES
+('HCP_101', 'EMAIL', 10, 8, 4, 0, 'CAMP_2026_Q1'),
+('HCP_102', 'WEBINAR', 2, 2, 1, 45, 'CAMP_2026_Q2'),
+('HCP_103', 'REP_VISIT', 5, 3, 1, 0, 'CAMP_2026_Q1');
+
+INSERT INTO fatigue_score (HCP_Name, Fatigue, Product, Campaign_Name) VALUES
+('Dr. John Smith', 85.50, 'OncoShield', 'Q1 Oncology Digital Drip'),
+('Dr. Sarah Connor', 92.00, 'OncoShield', 'Spring Omnichannel Blitz'),
+('Dr. Robert Bruce', 45.00, 'CardioGuard', 'Cardio Direct Email'),
+('Dr. Emily Watson', 78.20, 'ImmunoFlex', 'Immuno Digital Portal');
+
+-- ----------------------------------------------------
+-- 5. Create Secure Read-Only Database User
+-- ----------------------------------------------------
 DROP USER IF EXISTS 'mcp_readonly'@'localhost';
 CREATE USER 'mcp_readonly'@'localhost' IDENTIFIED BY 'mcp_secure_pass123';
 GRANT SELECT ON mcp_poc_db.* TO 'mcp_readonly'@'localhost';
 FLUSH PRIVILEGES;
 
--- Alternative creation for universal host connectivity (useful for Docker/remote testing)
 DROP USER IF EXISTS 'mcp_readonly'@'%';
 CREATE USER 'mcp_readonly'@'%' IDENTIFIED BY 'mcp_secure_pass123';
-GRANT SELECT ON mcp_poc_db.* TO 'mcp_readonly'@'%';
+GRANT SELECT ON mcp_poc_db.* TO 'mcp_readonly'@'%' ;
 FLUSH PRIVILEGES;

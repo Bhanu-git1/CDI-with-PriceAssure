@@ -5,39 +5,36 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.mcp_client import sf_mcp_client
-from app.llm_service import llm_service
+from app.llm_service import llm_service, db_service
 
 # Configure standard console logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("mcp-fastapi-app")
+logger = logging.getLogger("dce-fastapi-app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Start the local MCP Client (launches MCP subprocess)
-    logger.info("Initializing Salesforce MCP workspace...")
+    # Startup: Verify credentials & connection to MySQL
+    logger.info("Initializing MySQL DCE workspace...")
     try:
-        await sf_mcp_client.start()
-        logger.info("Salesforce MCP client started successfully.")
+        conn = db_service.get_connection()
+        conn.close()
+        logger.info("MySQL connection verified successfully (DCE).")
     except Exception as e:
-        logger.error(f"Failed to start Salesforce MCP client on startup: {e}")
+        logger.error(f"Failed to establish MySQL connection on startup: {e}")
     
     yield
     
-    # Shutdown: Stop client and sub-processes
-    logger.info("Shutting down Salesforce MCP workspace...")
-    await sf_mcp_client.stop()
-    logger.info("Salesforce MCP client shut down cleanly.")
+    logger.info("Shutting down MySQL DCE workspace...")
 
 # Create FastAPI instance with Lifespan lifecycle hooks
 app = FastAPI(
-    title="MCP Salesforce Chat Assistant",
-    description="FastAPI Backend for Salesforce CRM retrieval via Model Context Protocol",
-    version="2.0.0",
+    title="DCE MySQL Chat Assistant",
+    description="FastAPI Backend for MySQL database retrieval via Dynamic Code Execution",
+    version="3.0.0",
     lifespan=lifespan
 )
 
-# Configure CORS so React (Vite / Salesforce embedded) can query backend
+# Configure CORS so React can query backend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Open for development; restrict in production
@@ -53,7 +50,6 @@ class ChatMessage(BaseModel):
     sender: str
     text: str
     sql: Optional[str] = None
-    soql: Optional[str] = None
 
 # Request schema for Chat endpoint
 class ChatRequest(BaseModel):
@@ -66,35 +62,41 @@ class ChatRequest(BaseModel):
 @app.get("/api")
 @app.get("/")
 def read_root():
+    if settings.GROQ_API_KEY:
+        provider = f"Groq ({settings.GROQ_MODEL})"
+    elif settings.GEMINI_API_KEY:
+        provider = "Gemini API"
+    else:
+        provider = f"Ollama ({settings.OLLAMA_MODEL})"
+
     return {
         "status": "online",
-        "provider": "Gemini API" if settings.GEMINI_API_KEY else f"Ollama ({settings.OLLAMA_MODEL})",
-        "mcp_server": "salesforce-server (active)",
-        "platform": "Salesforce CRM"
+        "provider": provider,
+        "dce_service": "mysql-service (active)",
+        "platform": "MySQL Database"
     }
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
     """
-    Main endpoint for taking natural language prompts, calling LLM + MCP tools,
-    and returning formatted responses with Salesforce data.
+    Main endpoint for taking natural language prompts, calling LLM + DCE,
+    and returning formatted responses with MySQL data.
     """
     if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
         
-    logger.info(f"Received chat request: {request.message}")
+    logger.info(f"Received chat request (DCE): {request.message}")
     
-    # Run the prompt-tool calling loop
+    # Run the prompt-execution loop
     response_data = await llm_service.process_chat(request.message, request.history)
     return response_data
 
 @app.get("/api/schema")
 async def schema_endpoint():
     """
-    Exposes Salesforce object schema context to the frontend so it can render 
-    a visual object explorer.
+    Exposes MySQL table schema context to the frontend.
     """
-    logger.info("Fetching Salesforce schema info for explorer...")
+    logger.info("Fetching MySQL schema info for explorer...")
     schema_overview = await llm_service.get_schema_context()
     return {"schema": schema_overview}
 

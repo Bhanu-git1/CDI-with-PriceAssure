@@ -5,44 +5,72 @@ from typing import Dict, Any, Tuple, Optional
 import ollama
 
 from app.config import settings
-from app.mcp_client import sf_mcp_client
+from app.services.mysql_service import MySQLService
+from app.services.code_executor import CodeExecutor
+from app.semantic.loader import SemanticModelLoader
 
 logger = logging.getLogger("llm-service")
 
+# Singletons for direct DCE MySQL access & Semantic Layer
+db_service = MySQLService(
+    host=settings.MYSQL_HOST,
+    port=settings.MYSQL_PORT,
+    user=settings.MYSQL_USER,
+    password=settings.MYSQL_PASSWORD,
+    database=settings.MYSQL_DATABASE
+)
+code_executor = CodeExecutor(db_service)
+semantic_loader = SemanticModelLoader()
+
 SYSTEM_PROMPT = """
-You generate SOQL queries for a Salesforce org that uses two custom objects for task tracking.
+You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
+The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals) and UC2 (Journey Orchestration).
 
-########## STEP 1: PICK THE RIGHT OBJECT ##########
+UI DASHBOARD displays data from 4 PRIMARY TABLES:
+  1. Leakage_Activity (60 rows) — Main leakage records table
+  2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60)
+  3. leakage_history (13 rows) — Threshold update log
+  4. Compliance_Table (111 rows) — Govt plans bypassed KPI
 
-RULE: The word "task" (without "sub") means Task_Allocation__c. The word "sub-task" or "subtask" means Sub_Task__c.
+PRIMARY TRANSACTION TABLE for claims analysis:
+  5. copay_Claims_Transactions (713 rows) — Use for ALL copay/claims/reject queries
+     Response_Status: V=Verified(249), R=Rejected(237), A=Approved(227)
+     claim_status: PAID, REJECTED
 
-"task" / "tasks" / "task list" / "completed tasks" / "wip tasks" → FROM Task_Allocation__c
-"sub-task" / "subtask" / "sub task" / "subtasks"                → FROM Sub_Task__c
+WARNING: Reverse_Claims has only 1 test row. DO NOT use it for claims analysis.
 
-NEVER use the standard "Task" object. NEVER write "FROM Task".
+RULES:
+- ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
+- NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- Use standard MySQL SQL syntax.
+- Use ONLY the VERIFIED JOIN PATHS defined in the governance block.
+- Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
+- Data was seeded ~July 2026. Do NOT add date filters like CURDATE() or 'today' unless user explicitly asks for a specific date range.
+- When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 """
+
 
 class LLMService:
     def __init__(self):
-        self.use_gemini = bool(settings.GEMINI_API_KEY)
-        if self.use_gemini:
-            logger.info("Initializing Google Gemini client...")
+        if settings.GROQ_API_KEY:
+            self.provider = "groq"
+            logger.info(f"Initializing Groq client with model {settings.GROQ_MODEL} for DCE...")
+        elif settings.GEMINI_API_KEY:
+            self.provider = "gemini"
+            logger.info("Initializing Google Gemini client for DCE...")
             import google.generativeai as genai
             genai.configure(api_key=settings.GEMINI_API_KEY)
             
-            # Dynamically select the best available flash model
             model_name = 'gemini-1.5-flash'  # fallback default
             try:
                 available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 logger.info(f"Found available Gemini models: {available_models}")
                 
-                # Check list in order of preference
                 for candidate in ['models/gemini-2.0-flash', 'models/gemini-2.5-flash', 'models/gemini-1.5-flash']:
                     if candidate in available_models:
                         model_name = candidate
                         break
                 else:
-                    # Pick the first one that has "flash" into it 
                     flash_candidates = [m for m in available_models if 'flash' in m.lower()]
                     if flash_candidates:
                         model_name = flash_candidates[0]
@@ -53,87 +81,285 @@ class LLMService:
             except Exception as e:
                 logger.warning(f"Could not list available models, defaulting to {model_name}. Error: {e}")
                 
-            # If the name starts with "models/", strip it or keep it as required by GenerativeModel
             self.gemini_model = genai.GenerativeModel(model_name)
         else:
-            logger.info(f"Using local Ollama client running at {settings.OLLAMA_HOST} with model {settings.OLLAMA_MODEL}")
+            self.provider = "ollama"
+            logger.info(f"Using local Ollama client running at {settings.OLLAMA_HOST} with model {settings.OLLAMA_MODEL} for DCE")
 
     async def get_schema_context(self) -> str:
-        """Fetch Salesforce schema overview from the MCP server."""
+        """Fetch MySQL schema overview directly."""
         try:
-            schema_overview = await sf_mcp_client.read_resource("schema://overview")
-            return schema_overview
+            return db_service.get_schema_overview()
         except Exception as e:
             logger.error(f"Error fetching schema resource: {e}")
-            # Fallback to listing objects
             try:
-                objects = await sf_mcp_client.execute_tool("list_objects", {})
-                return f"Could not fetch complete schema overview, but available objects are:\n{objects}"
+                return db_service.list_tables()
             except Exception as inner_e:
-                return f"Could not establish Salesforce connection details. Error: {inner_e}"
+                return f"Could not establish MySQL connection details. Error: {inner_e}"
 
     async def process_chat(self, user_message: str, history: Optional[list] = None) -> Dict[str, Any]:
         """
-        Orchestrate the chat session. It uses LLM to generate tool calls,
-        executes them via MCP, feeds the results back, and returns the response.
+        Orchestrate the chat session. Uses LLM to generate Python code,
+        executes it in the CodeExecutor sandbox, and returns formatted responses.
         """
-        # 1. Fetch live schema info from MCP
-        schema_context = await self.get_schema_context()
-        
-        # 2. Format history context
         history_context = ""
         if history:
             formatted_history = []
-            for h in history:
+            for h in history[-3:]:
                 sender_name = "User" if h.sender == "user" else "Assistant"
                 formatted_history.append(f"{sender_name}: {h.text}")
-                if h.soql:
-                    formatted_history.append(f"  (SOQL executed: {h.soql})")
-                elif h.sql:
-                    formatted_history.append(f"  (SOQL executed: {h.sql})")
+                if h.sql:
+                    formatted_history.append(f"  (SQL executed: {h.sql})")
             history_context = "CONVERSATION HISTORY:\n" + "\n".join(formatted_history) + "\n\n"
             
-        # 3. Setup prompts
         context_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
-            f"SALESFORCE SCHEMA DETAILS:\n{schema_context}\n\n"
-            f"{history_context}\n"
-            "CRITICAL REMINDER FOR THIS ORG:\n"
-            "- NEVER use 'FROM Task' in SOQL. Standard Task table is not used for task tracking.\n"
-            "- For any task, sub-task, or status query, you must query custom objects 'Sub_Task__c' or 'Task_Allocation__c'.\n"
-            "- Filter user assignments using 'Resource__r.Name LIKE ...' (for Sub_Task__c) or 'Task_Resource__r.Name LIKE ...' (for Task_Allocation__c) instead of Owner.Name.\n\n"
+            f"{self._get_refinement_instructions()}\n\n"
+            f"{history_context}"
             f"User Question: {user_message}"
         )
 
-        if self.use_gemini:
+        if self.provider == "groq":
+            return await self._process_groq(user_message, context_prompt)
+        elif self.provider == "gemini":
             return await self._process_gemini(user_message, context_prompt)
         else:
             return await self._process_ollama(user_message, context_prompt)
 
-    async def _process_gemini(self, user_message: str, prompt: str) -> Dict[str, Any]:
-        """Process requests using Gemini API."""
+    def _get_refinement_instructions(self) -> str:
+        return (
+            "STRICT TABLE & COLUMN SELECTION MANDATE:\n"
+            "You MUST strictly follow the BUSINESS TO DATABASE MAPPING RULES listed above.\n\n"
+            "TABLE SELECTION QUICK REFERENCE & EXACT COLUMN SCHEMAS:\n"
+            "  1. `Leakage_Activity` (60 rows): HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage, productid. (PRE-RESOLVED — no JOINs needed for basic leakage queries).\n"
+            "  2. `leakage_history` (13 rows): id, previous_value, new_value, updated_by, updated_at.\n"
+            "  3. `copay_Claims_Transactions` (713 rows): Transaction_ID, transaction_datetime, Patient_Token, Prescriber_NPI, Pharmacy_ID, Response_Status ('V','R','A'), zip_code, payer_id, product_id, claim_status ('PAID','REJECTED'), reject_code, Reject_Message, claim_amount, BrandName, HCP_First_Name, HCP_Last_Name, HCP_Specialty, HCP_Practice_State. (NEVER use Reverse_Claims!).\n"
+            "  4. `fatigue_score` (49 rows): Fatigue_ID, HCP_Name, Fatigue (range 10-60), Product, Campaign_Name. (NO JOINs needed).\n"
+            "  5. `Compliance_Table` (111 rows): id, Patient_Token, Payer_id, Payer_Type ('Medicaid','Medicare'), Created_At. (Stores all excluded govt plan claims directly; Created_At is the violation timestamp. DO NOT filter on non-existent 'excluded' column!).\n"
+            "  6. `hcp_engagement_logs` (42 rows): Log_ID, HCP_ID (FK: Prescriber_NPI), Engagement_Date, Channel ('Email','Webinar'), Email_Sent, Email_Opened, Email_Clicked, Webinar_Minutes, Campaign_ID.\n"
+            "  7. `campaign_master` (100 rows): campaign_id, campaign_name, campaign_type, campaign_category, channel ('Email','Webinar',etc.), product_id, brand_name, target_audience, target_specialty, target_segment, budget_amount, expected_reach, status.\n"
+            "  8. `hcp_master` (103 rows): id, Prescriber_NPI, hcp_firstName, hcp_lastName, specialty, practice_state, practice_zip, phone, secure_fax. (Full HCP Name = CONCAT(hcp_firstName, ' ', hcp_lastName)).\n"
+            "  9. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
+            "  10. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
+            "CRITICAL RULES:\n"
+            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims.\n"
+            "  - NEVER USE Reverse_Claims for claims analysis. It has only 1 test row and its NPI/NDC formats do not match other tables.\n"
+            "  - NEVER invent column names. Key facts: (a) Leakage_Activity uses `BrandName` (camelCase), Product_Master uses `brand_name` (lowercase). (b) Leakage_Activity does NOT have Payer_Type or Rejection_Root_Cause columns. (c) leakage_history does NOT have a 'leakage' column. (d) hcp_master does NOT have a 'name' column.\n"
+            "  - NEVER join Prescriber_NPI to HCP_Name (ID vs string — 0 matches).\n"
+            "  - Do NOT add CURDATE() or date filters unless user explicitly asks for a specific date range.\n\n"
+            "VERIFIED JOIN PATHS (These are the ONLY joins that return data):\n"
+            "  - copay_Claims_Transactions.Prescriber_NPI = hcp_master.Prescriber_NPI (713 matches)\n"
+            "  - copay_Claims_Transactions.payer_id = Payer_Master.payer_id (713 matches)\n"
+            "  - copay_Claims_Transactions.reject_code = Reject_Code_Master.reject_code (178 matches)\n"
+            "  - hcp_engagement_logs.Campaign_ID = campaign_master.campaign_id (42 matches)\n"
+            "  - hcp_engagement_logs.HCP_ID = hcp_master.Prescriber_NPI (42 matches)\n"
+            "  - Compliance_Table.Payer_id = Payer_Master.payer_id (111 matches)\n"
+            "  - Leakage_Activity.productid = Product_Master.product_id (60 matches)\n\n"
+
+            "You write Python code to fetch or analyze data from a MySQL database via the whitelisted 'db' global object.\n"
+            "The available 'db' methods are:\n"
+            "  - db.execute_sql(sql_query: str) -> str: Runs read-only SQL SELECT. Returns a JSON string with 'records' and 'totalSize'. Must parse with json.loads().\n"
+            "  - db.describe_table(table_name: str) -> str: Returns schema details for a specific table.\n"
+            "  - db.list_tables() -> str: Returns list of tables in the database.\n"
+            "  - db.search_records(search_term: str) -> str: Runs cross-table text search. Returns JSON. Must parse with json.loads().\n\n"
+            "Rules for writing code:\n"
+            "  1. You MUST execute queries using db.execute_sql(). DO NOT hardcode empty lists or mock data.\n"
+            "  2. Parse the returned JSON string using json.loads() to access records.\n"
+            "  3. Store final output in variable 'result' = {'sql': '<query_string>', 'records': <records_list>}.\n"
+            "  4. Global scope has 'db', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
+            "  5. Write valid multi-line Python code with proper line breaks.\n"
+            "  6. When a PRE-DEFINED SQL MEASURE matches the user's question, adapt it as your template.\n\n"
+            "Example 1 - Leakage percentage (uses Leakage_Activity, no JOINs):\n"
+            "sql = \"SELECT HCP_Name, BrandName, Leakage_Percentage, Pharmacy_Rejections, State FROM Leakage_Activity ORDER BY Leakage_Percentage DESC\"\n"
+            "data = json.loads(db.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 2 - Rejected copay claims with severity (uses copay_Claims_Transactions + Reject_Code_Master):\n"
+            "sql = \"SELECT cct.Transaction_ID, cct.BrandName, cct.claim_amount, cct.reject_code, rcm.reject_description, rcm.severity FROM copay_Claims_Transactions cct JOIN Reject_Code_Master rcm ON cct.reject_code = rcm.reject_code WHERE cct.claim_status = 'REJECTED' ORDER BY cct.claim_amount DESC\"\n"
+            "data = json.loads(db.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 3 - Claims by payer type (uses copay_Claims_Transactions + Payer_Master):\n"
+            "sql = \"SELECT pm.payer_type, cct.claim_status, COUNT(*) as claim_count, SUM(cct.claim_amount) as total_amount FROM copay_Claims_Transactions cct JOIN Payer_Master pm ON cct.payer_id = pm.payer_id GROUP BY pm.payer_type, cct.claim_status ORDER BY claim_count DESC\"\n"
+            "data = json.loads(db.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 4 - HCP fatigue scores (uses fatigue_score, NO JOINs):\n"
+            "sql = \"SELECT HCP_Name, Fatigue, Product, Campaign_Name FROM fatigue_score ORDER BY Fatigue DESC\"\n"
+            "data = json.loads(db.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 5 - Compliance violations by payer (uses Compliance_Table + Payer_Master):\n"
+            "sql = \"SELECT pm.payer_name, pm.payer_type, pm.region, COUNT(*) as violation_count FROM Compliance_Table ct JOIN Payer_Master pm ON ct.Payer_id = pm.payer_id GROUP BY pm.payer_name, pm.payer_type, pm.region ORDER BY violation_count DESC\"\n"
+            "data = json.loads(db.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Format your output ONLY as a JSON object with these keys:\n"
+            "{\n"
+            "  \"reasoning\": \"your reasoning/steps\",\n"
+            "  \"code\": \"python code string to run\",\n"
+            "  \"answer\": \"natural language answer if no database query is required\"\n"
+            "}\n"
+            "Output ONLY the JSON object. Do not wrap in markdown tags like ```json."
+        )
+
+    async def _call_groq_api(self, messages: list, response_format: Optional[dict] = None, temperature: float = 0.1) -> str:
+        headers = {
+            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        models_to_try = [settings.GROQ_MODEL]
+        for fb in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+            if fb not in models_to_try:
+                models_to_try.append(fb)
+                
+        last_error = None
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for model_name in models_to_try:
+                for fmt in [response_format, None]:
+                    payload = {
+                        "model": model_name,
+                        "messages": messages,
+                        "temperature": temperature
+                    }
+                    if fmt:
+                        payload["response_format"] = fmt
+                        
+                    logger.info(f"Calling Groq API ({model_name}, json_mode={bool(fmt)})...")
+                    resp = await client.post(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        headers=headers,
+                        json=payload
+                    )
+                    if resp.status_code == 200:
+                        resp_json = resp.json()
+                        return resp_json["choices"][0]["message"]["content"].strip()
+                    elif resp.status_code in (400, 429):
+                        logger.warning(f"Groq API {resp.status_code} on {model_name} (json_mode={bool(fmt)}). Retrying fallback...")
+                        last_error = f"Groq API Error {resp.status_code}: {resp.text}"
+                        continue
+                    else:
+                        raise RuntimeError(f"Groq API Error {resp.status_code}: {resp.text}")
+                    
+        raise RuntimeError(last_error or "Groq API request failed across all models.")
+
+    def _extract_json(self, text: str) -> Dict[str, Any]:
+        """Robust JSON payload extractor that handles markdown code blocks and multiline strings."""
+        if not text:
+            return {}
+        raw = text.strip()
+        if "```json" in raw:
+            raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in raw:
+            raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
+            
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            raw = raw[start:end+1]
+            
         try:
-            refinement_prompt = (
-                f"{prompt}\n\n"
-                "If the query requires Salesforce data, output a JSON object in this format:\n"
-                '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
-                "If you need to first discover the schema of an object, output:\n"
-                '{"reasoning": "...", "describe_object": "ObjectName"}\n'
-                "If the user wants a cross-object text search, output:\n"
-                '{"reasoning": "...", "sosl": "FIND {term} IN ALL FIELDS RETURNING ..."}\n'
-                "Otherwise, output a JSON object in this format:\n"
-                '{"reasoning": "...", "answer": "your natural language answer"}\n'
-                "Output ONLY the JSON object. Do not include markdown code block formatting like ```json ... ```. Just the raw JSON string."
+            return json.loads(raw, strict=False)
+        except Exception:
+            import re
+            def fix_newlines(match):
+                return match.group(0).replace("\n", "\\n").replace("\r", "")
+            cleaned = re.sub(r'"([^"\\]*(\\.[^"\\]*)*)"', fix_newlines, raw, flags=re.DOTALL)
+            try:
+                return json.loads(cleaned, strict=False)
+            except Exception as e:
+                logger.error(f"JSON parsing failed: {e}. Raw text snippet: {text[:200]}")
+                return {}
+
+    async def _process_groq(self, user_message: str, prompt: str) -> Dict[str, Any]:
+        """Process requests using Groq API (with automatic 429 rate-limit fallback) and dynamic code execution."""
+        try:
+            logger.info("Calling Groq API for code generation...")
+            response_text = await self._call_groq_api(
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.1
             )
             
-            logger.info("Calling Gemini API...")
+            logger.info(f"Groq raw output: {response_text}")
+            parsed = self._extract_json(response_text)
+
+            code = parsed.get("code")
+            answer = parsed.get("answer")
+
+            if code and code.strip():
+                # Perform code safety validation and execution
+                execution = code_executor.execute(code)
+                if execution["error"]:
+                    return {
+                        "answer": f"Code execution failed.",
+                        "sql": code,
+                        "data": None,
+                        "error": execution["error"]
+                    }
+                
+                result_data = execution["result"]
+                logger.info(f"Sandbox execution results: {result_data}")
+
+                # Summarize results with LLM
+                final_prompt = (
+                    f"You are a MySQL data expert.\n"
+                    f"User asked: {user_message}\n"
+                    f"You ran this Python code:\n{code}\n"
+                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
+                    f"Provide a natural language summary of the results. Be clear and direct."
+                )
+                
+                try:
+                    final_answer = await self._call_groq_api(
+                        messages=[{"role": "user", "content": final_prompt}],
+                        temperature=0.2
+                    )
+                except Exception as e:
+                    logger.warning(f"Summarization call failed, defaulting: {e}")
+                    final_answer = "Query executed successfully."
+
+                sql_to_return = code
+                data_to_return = None
+
+                if isinstance(result_data, dict):
+                    sql_to_return = result_data.get("sql") or result_data.get("query") or code
+                    data_to_return = result_data.get("records") or result_data.get("data")
+                    if data_to_return is None:
+                        data_to_return = result_data
+                else:
+                    data_to_return = result_data
+
+                return {
+                    "answer": final_answer,
+                    "sql": sql_to_return,
+                    "data": data_to_return,
+                    "error": None
+                }
+            else:
+                return {
+                    "answer": answer or "I couldn't process that query.",
+                    "sql": None,
+                    "data": None,
+                    "error": None
+                }
+                
+        except Exception as e:
+            logger.exception("Error in Groq processing")
+            return {
+                "answer": f"Groq Error: {str(e)}",
+                "sql": None,
+                "data": None,
+                "error": str(e)
+            }
+
+
+    async def _process_gemini(self, user_message: str, prompt: str) -> Dict[str, Any]:
+        """Process requests using Gemini API and dynamic code execution."""
+        try:
+            logger.info("Calling Gemini API for code generation...")
             response = self.gemini_model.generate_content(
-                refinement_prompt,
+                prompt,
                 generation_config={"response_mime_type": "application/json"}
             )
             response_text = response.text.strip()
             
-            # Clean up response if model wraps it in markdown blocks
             if response_text.startswith("```json"):
                 response_text = response_text.replace("```json", "", 1)
             if response_text.endswith("```"):
@@ -143,136 +369,56 @@ class LLMService:
             logger.info(f"Gemini raw output: {response_text}")
             parsed = json.loads(response_text)
 
-            # Handle describe_object request (schema discovery step)
-            describe_obj = parsed.get("describe_object")
-            if describe_obj:
-                logger.info(f"Gemini wants to describe object: {describe_obj}")
-                if describe_obj.strip().lower() == "task":
-                    logger.info("Redirecting describe_object 'Task' to custom task objects.")
-                    schema_result_st = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Sub_Task__c"})
-                    schema_result_ta = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Task_Allocation__c"})
-                    schema_result = (
-                        "CRITICAL INFO: The standard 'Task' object is NOT used. You must query 'Sub_Task__c' or 'Task_Allocation__c'.\n"
-                        f"Sub_Task__c fields:\n{schema_result_st}\n\n"
-                        f"Task_Allocation__c fields:\n{schema_result_ta}"
-                    )
-                else:
-                    schema_result = await sf_mcp_client.execute_tool("describe_object", {"object_name": describe_obj})
-                
-                # Now re-prompt with the schema info to generate the actual SOQL
-                followup_prompt = (
-                    f"{prompt}\n\n"
-                    f"ADDITIONAL SCHEMA INFO for '{describe_obj}':\n{schema_result}\n\n"
-                    "Now generate the SOQL query. Output a JSON object:\n"
-                    '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
-                    "Output ONLY the JSON object."
-                )
-                
-                response2 = self.gemini_model.generate_content(
-                    followup_prompt,
-                    generation_config={"response_mime_type": "application/json"}
-                )
-                response_text2 = response2.text.strip()
-                if response_text2.startswith("```json"):
-                    response_text2 = response_text2.replace("```json", "", 1)
-                if response_text2.endswith("```"):
-                    response_text2 = response_text2[:-3]
-                response_text2 = response_text2.strip()
-                parsed = json.loads(response_text2)
+            code = parsed.get("code")
+            answer = parsed.get("answer")
 
-            # Handle SOSL search
-            sosl = parsed.get("sosl")
-            if sosl:
-                logger.info(f"Gemini suggested SOSL: {sosl}")
-                search_results = await sf_mcp_client.execute_tool("search_records", {"sosl_query": sosl})
+            if code and code.strip():
+                # Perform code safety validation and execution
+                execution = code_executor.execute(code)
+                if execution["error"]:
+                    return {
+                        "answer": f"Code execution failed.",
+                        "sql": code,
+                        "data": None,
+                        "error": execution["error"]
+                    }
                 
+                result_data = execution["result"]
+                logger.info(f"Sandbox execution results: {result_data}")
+
+                # Summarize results with LLM
                 final_prompt = (
-                    f"You are a Salesforce data expert.\n"
+                    f"You are a MySQL data expert.\n"
                     f"User asked: {user_message}\n"
-                    f"You ran this SOSL search: {sosl}\n"
-                    f"And got these results: {search_results}\n\n"
+                    f"You ran this Python code:\n{code}\n"
+                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
                     f"Provide a natural language summary of the results. Be clear and direct."
                 )
                 final_response = self.gemini_model.generate_content(final_prompt)
-                
-                try:
-                    data_obj = json.loads(search_results)
-                    # Flatten search results for table display
-                    flat_data = []
-                    for obj_type, records in data_obj.get("resultsByObject", {}).items():
-                        for r in records:
-                            r["_ObjectType"] = obj_type
-                            flat_data.append(r)
-                    data_obj = flat_data if flat_data else None
-                except Exception:
-                    data_obj = None
+
+                # Process result formatting for frontend
+                sql_to_return = code
+                data_to_return = None
+
+                if isinstance(result_data, dict):
+                    # Extract raw SQL query if stored in result, otherwise return the python script code
+                    sql_to_return = result_data.get("sql") or result_data.get("query") or code
+                    data_to_return = result_data.get("records") or result_data.get("data")
+                    if data_to_return is None:
+                        # Fallback to the whole result if records/data not explicitly defined
+                        data_to_return = result_data
+                else:
+                    data_to_return = result_data
 
                 return {
                     "answer": final_response.text,
-                    "sql": sosl,
-                    "data": data_obj,
-                    "error": None
-                }
-            
-            # Handle SOQL query
-            soql = parsed.get("soql")
-            if soql:
-                import re
-                if re.search(r"\bFROM\s+Task\b", soql, re.IGNORECASE):
-                    logger.warning("SOQL query attempted to query standard 'Task' table. Re-prompting for correction...")
-                    followup_prompt = (
-                        f"{prompt}\n\n"
-                        f"ERROR: Your previous query '{soql}' queried the standard 'Task' object.\n"
-                        "CRITICAL REMINDER: The standard 'Task' object is NOT used and does NOT contain task allocation fields.\n"
-                        "You MUST query either 'Sub_Task__c' or 'Task_Allocation__c' instead. Do NOT use standard fields like Owner.Name or Subject. Use Resource__r.Name and Status__c (for Sub_Task__c) or Task_Resource__r.Name and Task_Status__c (for Task_Allocation__c).\n\n"
-                        "Now generate the correct SOQL query. Output a JSON object:\n"
-                        '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
-                        "Output ONLY the JSON object."
-                    )
-                    response2 = self.gemini_model.generate_content(
-                        followup_prompt,
-                        generation_config={"response_mime_type": "application/json"}
-                    )
-                    response_text2 = response2.text.strip()
-                    if response_text2.startswith("```json"):
-                        response_text2 = response_text2.replace("```json", "", 1)
-                    if response_text2.endswith("```"):
-                        response_text2 = response_text2[:-3]
-                    response_text2 = response_text2.strip()
-                    parsed = json.loads(response_text2)
-                    soql = parsed.get("soql")
-
-            if soql:
-                logger.info(f"Gemini suggested SOQL: {soql}")
-                # Execute the SOQL via MCP tool
-                sf_results = await sf_mcp_client.execute_tool("execute_soql", {"soql_query": soql})
-                
-                # Format final answer
-                final_prompt = (
-                    f"You are a Salesforce data expert.\n"
-                    f"User asked: {user_message}\n"
-                    f"You ran this SOQL: {soql}\n"
-                    f"And got these results: {sf_results}\n\n"
-                    f"Provide a natural language summary of the results. Be clear and direct. Also state what Salesforce returned."
-                )
-                final_response = self.gemini_model.generate_content(final_prompt)
-                
-                # Attempt to parse results for visual charts/tables
-                try:
-                    result_obj = json.loads(sf_results)
-                    data_obj = result_obj.get("records", None)
-                except Exception:
-                    data_obj = None
-
-                return {
-                    "answer": final_response.text,
-                    "sql": soql,
-                    "data": data_obj,
+                    "sql": sql_to_return,
+                    "data": data_to_return,
                     "error": None
                 }
             else:
                 return {
-                    "answer": parsed.get("answer", "I couldn't process that query."),
+                    "answer": answer or "I couldn't process that query.",
                     "sql": None,
                     "data": None,
                     "error": None
@@ -281,47 +427,30 @@ class LLMService:
         except Exception as e:
             logger.exception("Error in Gemini processing")
             return {
-                "answer": "An error occurred while generating the Salesforce response.",
+                "answer": "An error occurred while generating the MySQL response.",
                 "sql": None,
                 "data": None,
                 "error": str(e)
             }
 
     async def _process_ollama(self, user_message: str, prompt: str) -> Dict[str, Any]:
-        """Process requests using Local Ollama."""
+        """Process requests using Local Ollama and dynamic code execution."""
         try:
-            # Check Ollama health
             async with httpx.AsyncClient() as client:
                 try:
                     await client.get(settings.OLLAMA_HOST, timeout=2.0)
                 except Exception:
                     raise RuntimeError(f"Ollama server is not running or unreachable at {settings.OLLAMA_HOST}. Make sure you ran 'ollama serve'.")
 
-            refinement_prompt = (
-                f"{prompt}\n\n"
-                "If the query requires Salesforce data, output a JSON object in this format:\n"
-                '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
-                "If you need to first discover the schema of an object, output:\n"
-                '{"reasoning": "...", "describe_object": "ObjectName"}\n'
-                "If the user wants a cross-object text search, output:\n"
-                '{"reasoning": "...", "sosl": "FIND {term} IN ALL FIELDS RETURNING ..."}\n'
-                "Otherwise, output a JSON object in this format:\n"
-                '{"reasoning": "...", "answer": "your natural language answer"}\n'
-                "Output ONLY the JSON object. Do not include markdown code block formatting like ```json ... ```. Just the raw JSON string."
-            )
-            
-            logger.info("Calling local Ollama model...")
+            logger.info("Calling local Ollama model for code generation...")
             response = ollama.chat(
                 model=settings.OLLAMA_MODEL,
-                messages=[
-                    {"role": "user", "content": refinement_prompt}
-                ],
+                messages=[{"role": "user", "content": prompt}],
                 format="json",
-                options={"temperature": 0.1}  # low temperature for precise SOQL
+                options={"temperature": 0.1}
             )
             
             response_text = response['message']['content'].strip()
-            # Clean up JSON if model wraps in markdown
             if response_text.startswith("```json"):
                 response_text = response_text.replace("```json", "", 1)
             if response_text.endswith("```"):
@@ -331,55 +460,27 @@ class LLMService:
             logger.info(f"Ollama raw output: {response_text}")
             parsed = json.loads(response_text)
 
-            # Handle describe_object request (schema discovery step)
-            describe_obj = parsed.get("describe_object")
-            if describe_obj:
-                logger.info(f"Ollama wants to describe object: {describe_obj}")
-                if describe_obj.strip().lower() == "task":
-                    logger.info("Redirecting describe_object 'Task' to custom task objects.")
-                    schema_result_st = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Sub_Task__c"})
-                    schema_result_ta = await sf_mcp_client.execute_tool("describe_object", {"object_name": "Task_Allocation__c"})
-                    schema_result = (
-                        "CRITICAL INFO: The standard 'Task' object is NOT used. You must query 'Sub_Task__c' or 'Task_Allocation__c'.\n"
-                        f"Sub_Task__c fields:\n{schema_result_st}\n\n"
-                        f"Task_Allocation__c fields:\n{schema_result_ta}"
-                    )
-                else:
-                    schema_result = await sf_mcp_client.execute_tool("describe_object", {"object_name": describe_obj})
-                
-                followup_prompt = (
-                    f"{prompt}\n\n"
-                    f"ADDITIONAL SCHEMA INFO for '{describe_obj}':\n{schema_result}\n\n"
-                    "Now generate the SOQL query. Output a JSON object:\n"
-                    '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
-                    "Output ONLY the JSON object."
-                )
-                
-                response2 = ollama.chat(
-                    model=settings.OLLAMA_MODEL,
-                    messages=[{"role": "user", "content": followup_prompt}],
-                    format="json",
-                    options={"temperature": 0.1}
-                )
-                response_text2 = response2['message']['content'].strip()
-                if response_text2.startswith("```json"):
-                    response_text2 = response_text2.replace("```json", "", 1)
-                if response_text2.endswith("```"):
-                    response_text2 = response_text2[:-3]
-                response_text2 = response_text2.strip()
-                parsed = json.loads(response_text2)
+            code = parsed.get("code")
+            answer = parsed.get("answer")
 
-            # Handle SOSL search
-            sosl = parsed.get("sosl")
-            if sosl:
-                logger.info(f"Ollama suggested SOSL: {sosl}")
-                search_results = await sf_mcp_client.execute_tool("search_records", {"sosl_query": sosl})
+            if code and code.strip():
+                execution = code_executor.execute(code)
+                if execution["error"]:
+                    return {
+                        "answer": f"Code execution failed.",
+                        "sql": code,
+                        "data": None,
+                        "error": execution["error"]
+                    }
                 
+                result_data = execution["result"]
+                logger.info(f"Sandbox execution results: {result_data}")
+
                 final_prompt = (
-                    f"You are a Salesforce data expert.\n"
+                    f"You are a MySQL data expert.\n"
                     f"User asked: {user_message}\n"
-                    f"You ran this SOSL search: {sosl}\n"
-                    f"And got these results: {search_results}\n\n"
+                    f"You ran this Python code:\n{code}\n"
+                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
                     f"Provide a natural language summary of the results. Be clear and direct."
                 )
                 
@@ -388,86 +489,26 @@ class LLMService:
                     messages=[{"role": "user", "content": final_prompt}]
                 )
                 
-                try:
-                    data_obj = json.loads(search_results)
-                    flat_data = []
-                    for obj_type, records in data_obj.get("resultsByObject", {}).items():
-                        for r in records:
-                            r["_ObjectType"] = obj_type
-                            flat_data.append(r)
-                    data_obj = flat_data if flat_data else None
-                except Exception:
-                    data_obj = None
+                sql_to_return = code
+                data_to_return = None
+
+                if isinstance(result_data, dict):
+                    sql_to_return = result_data.get("sql") or result_data.get("query") or code
+                    data_to_return = result_data.get("records") or result_data.get("data")
+                    if data_to_return is None:
+                        data_to_return = result_data
+                else:
+                    data_to_return = result_data
 
                 return {
                     "answer": final_resp['message']['content'],
-                    "sql": sosl,
-                    "data": data_obj,
-                    "error": None
-                }
-            
-            # Handle SOQL query
-            soql = parsed.get("soql")
-            if soql:
-                import re
-                if re.search(r"\bFROM\s+Task\b", soql, re.IGNORECASE):
-                    logger.warning("SOQL query attempted to query standard 'Task' table. Re-prompting for correction...")
-                    followup_prompt = (
-                        f"{prompt}\n\n"
-                        f"ERROR: Your previous query '{soql}' queried the standard 'Task' object.\n"
-                        "CRITICAL REMINDER: The standard 'Task' object is NOT used and does NOT contain task allocation fields.\n"
-                        "You MUST query either 'Sub_Task__c' or 'Task_Allocation__c' instead. Do NOT use standard fields like Owner.Name or Subject. Use Resource__r.Name and Status__c (for Sub_Task__c) or Task_Resource__r.Name and Task_Status__c (for Task_Allocation__c).\n\n"
-                        "Now generate the correct SOQL query. Output a JSON object:\n"
-                        '{"reasoning": "...", "soql": "SELECT ... FROM ..."}\n'
-                        "Output ONLY the JSON object."
-                    )
-                    response2 = ollama.chat(
-                        model=settings.OLLAMA_MODEL,
-                        messages=[{"role": "user", "content": followup_prompt}],
-                        format="json",
-                        options={"temperature": 0.1}
-                    )
-                    response_text2 = response2['message']['content'].strip()
-                    if response_text2.startswith("```json"):
-                        response_text2 = response_text2.replace("```json", "", 1)
-                    if response_text2.endswith("```"):
-                        response_text2 = response_text2[:-3]
-                    response_text2 = response_text2.strip()
-                    parsed = json.loads(response_text2)
-                    soql = parsed.get("soql")
-
-            if soql:
-                logger.info(f"Ollama suggested SOQL: {soql}")
-                sf_results = await sf_mcp_client.execute_tool("execute_soql", {"soql_query": soql})
-                
-                final_prompt = (
-                    f"You are a Salesforce data expert.\n"
-                    f"User asked: {user_message}\n"
-                    f"You ran this SOQL: {soql}\n"
-                    f"And got these results: {sf_results}\n\n"
-                    f"Provide a natural language summary of the results. Be clear and direct. Also state what Salesforce returned."
-                )
-                
-                final_resp = ollama.chat(
-                    model=settings.OLLAMA_MODEL,
-                    messages=[{"role": "user", "content": final_prompt}]
-                )
-                
-                try:
-                    result_obj = json.loads(sf_results)
-                    data_obj = result_obj.get("records", None)
-                except Exception:
-                    data_obj = None
-                    
-                return {
-                    "answer": final_resp['message']['content'],
-                    "sql": soql,
-                    "data": data_obj,
+                    "sql": sql_to_return,
+                    "data": data_to_return,
                     "error": None
                 }
             else:
                 return {
-                    "answer": parsed.get("answer", "I couldn't process that query."),
+                    "answer": answer or "I couldn't process that query.",
                     "sql": None,
                     "data": None,
                     "error": None

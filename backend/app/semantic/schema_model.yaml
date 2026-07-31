@@ -1,0 +1,606 @@
+version: 2
+semantic_model:
+  name: pharma_commercial_command_centre
+  description: >
+    Semantic layer for the Pharma Commercial Command Centre (UC1: Leakage Signals, UC2: Journey Orchestration).
+    The UI dashboard displays data from 4 primary tables: Leakage_Activity, fatigue_score, leakage_history, and Compliance_Table.
+    These are enriched during the data pipeline from reference tables: Product_Master, hcp_master, Zip_Geography_Master,
+    Payer_Master, hcp_engagement_logs, campaign_master, and copay_Claims_Transactions.
+
+  # ============================================================
+  # PRIMARY UI TABLES — Data displayed directly on the dashboard
+  # ============================================================
+  sources:
+    - name: mysql_local
+      database: mcp_poc_db
+      tables:
+
+        # =====================================================
+        # PRIMARY TABLE 1: Leakage Activity (Main UI Table)
+        # =====================================================
+        - name: Leakage_Activity
+          description: >
+            PRIMARY UI TABLE — Main Leakage Records Table rendered on the dashboard.
+            Contains pre-enriched, aggregated pharmacy leakage metrics.
+            HCP_Name, State, BrandName are ALREADY RESOLVED — no joins needed for basic leakage queries.
+            Use for ALL leakage queries: leakage %, top leakage, rejections, leakage by zip/HCP/state.
+            60 rows. States: AZ, CA, DC, FL, GA, IL, IN, NC, NV, NY, OH, PA, TX, WA.
+          columns:
+            - name: id
+              type: primary_key
+            - name: BrandName
+              type: string
+              description: "Drug brand name (pre-resolved from Product_Master during pipeline)"
+            - name: Pharmacy_ID
+              type: string
+            - name: zip_code
+              type: string
+              references: Zip_Geography_Master.zip_code
+            - name: Prescriber_NPI
+              type: string
+              references: hcp_master.Prescriber_NPI
+            - name: HCP_Name
+              type: string
+              description: "Full physician name (pre-resolved from hcp_master during pipeline)"
+            - name: State
+              type: string
+              description: "US state code (pre-resolved from Zip_Geography_Master during pipeline). Available: AZ, CA, DC, FL, GA, IL, IN, NC, NV, NY, OH, PA, TX, WA"
+            - name: Pharmacy_Rejections
+              type: integer
+              description: "Number of rejections for this pharmacy-brand-HCP combination"
+            - name: Total_Brand_Rejections
+              type: integer
+              description: "Total rejections across ALL pharmacies for this brand"
+            - name: Leakage_Percentage
+              type: decimal
+              description: "Formula: (Pharmacy_Rejections / Total_Brand_Rejections) * 100"
+            - name: generic_name
+              type: string
+            - name: manufacturer
+              type: string
+            - name: productid
+              type: string
+              references: Product_Master.product_id
+            - name: Processed_TimeStamp
+              type: timestamp
+              description: "Data seeded around July 3, 2026"
+
+        # =====================================================
+        # PRIMARY TABLE 2: Fatigue Score (UI Fatigue Table)
+        # =====================================================
+        - name: fatigue_score
+          description: >
+            PRIMARY UI TABLE — Fatigue Records Table rendered on the dashboard.
+            Pre-calculated HCP fatigue scores with ALREADY RESOLVED names.
+            Contains HCP_Name, Product, Campaign_Name, and Fatigue DIRECTLY.
+            DO NOT JOIN other tables. 49 rows. Fatigue range: 10-60.
+          columns:
+            - name: Fatigue_ID
+              type: primary_key
+            - name: HCP_Name
+              type: string
+              description: "Full physician name (pre-resolved)"
+            - name: Fatigue
+              type: decimal
+              description: "Fatigue score 10-60. Higher = more fatigued. Average ~40."
+            - name: Product
+              type: string
+              description: "Drug/product brand name (pre-resolved)"
+            - name: Campaign_Name
+              type: string
+              description: "Marketing campaign name (pre-resolved)"
+            - name: Processed_TimeStamp
+              type: timestamp
+
+        # =====================================================
+        # PRIMARY TABLE 3: Leakage History (UI Threshold Log)
+        # =====================================================
+        - name: leakage_history
+          description: >
+            PRIMARY UI TABLE — Threshold Update Log displayed on the dashboard.
+            Audit trail of leakage threshold value changes. 13 rows.
+            ONLY for: leakage limit, leakage threshold, history of changes, who updated.
+            Does NOT contain leakage percentage data.
+          columns:
+            - name: id
+              type: primary_key
+            - name: previous_value
+              type: decimal
+              description: "Old threshold value before change"
+            - name: new_value
+              type: decimal
+              description: "New threshold value after change"
+            - name: updated_by
+              type: string
+              description: "Admin user who made the change"
+            - name: updated_at
+              type: timestamp
+              description: "Date range: Jun 24 - Jul 29, 2026"
+
+        # =====================================================
+        # PRIMARY TABLE 4: Compliance Table (UI KPI Card)
+        # =====================================================
+        - name: Compliance_Table
+          description: >
+            PRIMARY UI TABLE — Count displayed on KPI card (Govt. Plans Bypassed).
+            Stores Medicaid/Medicare rejected claims excluded during compliance filtering.
+            111 rows. Payer types: Medicaid, Medicare.
+          columns:
+            - name: id
+              type: primary_key
+            - name: Patient_Token
+              type: string
+            - name: Payer_id
+              type: string
+              references: Payer_Master.payer_id
+            - name: Payer_Type
+              type: string
+              description: "Values: Medicaid, Medicare"
+            - name: Created_At
+              type: timestamp
+              description: "Date range: Jul 3 - Jul 29, 2026"
+
+        # =====================================================
+        # TRANSACTION TABLE: Copay Claims (Primary claims data)
+        # =====================================================
+        - name: copay_Claims_Transactions
+          description: >
+            PRIMARY TRANSACTION TABLE — 713 rows of copay claims data.
+            This is the MAIN claims table with rich data. Use for ALL copay queries,
+            claim analysis, reject codes, claim amounts, payer analysis, and HCP claim profiles.
+            Response_Status values: V=Verified(249), R=Rejected(237), A=Approved(227).
+            Has denormalized HCP profile snapshot and successful joins to hcp_master, Payer_Master, and Reject_Code_Master.
+          columns:
+            - name: Transaction_ID
+              type: primary_key
+            - name: transaction_datetime
+              type: timestamp
+              description: "Data up to Jun 22, 2026"
+            - name: Patient_Token
+              type: string
+            - name: Prescriber_NPI
+              type: string
+              references: hcp_master.Prescriber_NPI
+            - name: Pharmacy_ID
+              type: string
+            - name: NDC_Code
+              type: string
+            - name: Payer_BIN
+              type: string
+            - name: Response_Status
+              type: string
+              description: "Values: V (Verified/249 rows), R (Rejected/237 rows), A (Approved/227 rows)"
+            - name: zip_code
+              type: string
+              references: Zip_Geography_Master.zip_code
+            - name: payer_id
+              type: string
+              references: Payer_Master.payer_id
+            - name: product_id
+              type: integer
+              references: Product_Master.product_id
+            - name: claim_status
+              type: string
+              description: "Values: PAID, REJECTED"
+            - name: reject_code
+              type: string
+              references: Reject_Code_Master.reject_code
+            - name: Reject_Message
+              type: string
+            - name: claim_amount
+              type: decimal
+            - name: BrandName
+              type: string
+              description: "Drug brand name (denormalized)"
+            - name: HCP_Match_Status
+              type: string
+            - name: HCP_First_Name
+              type: string
+            - name: HCP_Last_Name
+              type: string
+            - name: HCP_Specialty
+              type: string
+              description: "Denormalized specialty from HCP profile"
+            - name: HCP_State_License
+              type: string
+            - name: HCP_Practice_State
+              type: string
+            - name: HCP_Contact_Phone
+              type: string
+            - name: HCP_Secure_Fax
+              type: string
+            - name: HCP_Practice_Zip
+              type: string
+
+        # =====================================================
+        # REFERENCE / ENRICHMENT TABLES
+        # =====================================================
+        - name: Product_Master
+          description: "Reference table: Product catalog mapping NDC codes to brand names, generic names, product IDs, and manufacturers. 100 rows."
+          columns:
+            - name: ndc_code
+              type: primary_key
+              description: "National Drug Code (format: NDC00001)"
+            - name: product_id
+              type: integer
+            - name: brand_name
+              type: string
+              description: "Commercial brand name (lowercase column name)"
+            - name: generic_name
+              type: string
+            - name: manufacturer
+              type: string
+
+        - name: hcp_master
+          description: "Reference table: Healthcare Provider directory. 103 rows. Practice states: TX, TN, KA. 18 specialties."
+          columns:
+            - name: id
+              type: primary_key
+            - name: Prescriber_NPI
+              type: string
+              description: "National Provider Identifier (format: 1000000XXX)"
+            - name: hcp_firstName
+              type: string
+            - name: hcp_lastName
+              type: string
+            - name: specialty
+              type: string
+              description: "18 specialties: Cardiology, Dermatology, Endocrinology, Gastroenterology, General Medicine, Internal Medicine, Nephrology, Neurology, Obstetrics & Gynecology, Oncology, Ophthalmology, Orthopedics, Pediatrics, Psychiatry, Pulmonology, Radiology, Rheumatology, Urology"
+            - name: state_license
+              type: string
+            - name: practice_state
+              type: string
+              description: "Available values: TX, TN, KA"
+            - name: practice_zip
+              type: string
+            - name: phone
+              type: string
+            - name: secure_fax
+              type: string
+            - name: rep_id
+              type: string
+            - name: email
+              type: string
+
+        - name: Zip_Geography_Master
+          description: "Reference table: Maps zip codes to city, county, and state. 23 rows."
+          columns:
+            - name: zip_code
+              type: primary_key
+            - name: city
+              type: string
+            - name: county
+              type: string
+            - name: state
+              type: string
+
+        - name: Payer_Master
+          description: "Reference table: Insurance plan directory. 200 rows. Types: Commercial, Medicare, Medicaid."
+          columns:
+            - name: payer_id
+              type: primary_key
+            - name: payer_name
+              type: string
+            - name: payer_type
+              type: string
+              description: "Values: Commercial, Medicare, Medicaid"
+            - name: region
+              type: string
+
+        - name: campaign_master
+          description: "Reference table: Marketing campaign directory. 100 rows. 8 channels, 10 types, 4 statuses. Date range: Apr 1 - Sep 30, 2026."
+          columns:
+            - name: campaign_id
+              type: primary_key
+            - name: campaign_name
+              type: string
+            - name: campaign_type
+              type: string
+              description: "10 types: Pharmacy Education, HCP Engagement, Digital Nurture, Brand Awareness, Market Expansion, Patient Adherence, Payer Engagement, Product Launch, Patient Support, Disease Awareness"
+            - name: campaign_category
+              type: string
+            - name: channel
+              type: string
+              description: "8 channels: Digital Ads, Email, Mobile App, Rep Visit, SMS, Social Media, Virtual Event, Webinar"
+            - name: product_id
+              type: integer
+              references: Product_Master.product_id
+            - name: brand_name
+              type: string
+            - name: target_audience
+              type: string
+            - name: target_specialty
+              type: string
+            - name: target_segment
+              type: string
+            - name: objective
+              type: string
+            - name: region
+              type: string
+            - name: start_date
+              type: date
+            - name: end_date
+              type: date
+            - name: budget_amount
+              type: decimal
+            - name: expected_reach
+              type: integer
+            - name: status
+              type: string
+              description: "Values: Active, Completed, Planned, Cancelled"
+            - name: priority_level
+              type: string
+            - name: owner_name
+              type: string
+            - name: created_date
+              type: timestamp
+            - name: modified_date
+              type: timestamp
+
+        - name: hcp_engagement_logs
+          description: "Reference table: Digital touchpoint logs per HCP. 42 rows. Channels: Email, Webinar. Date range: Jun 1-30, 2026."
+          columns:
+            - name: Log_ID
+              type: primary_key
+            - name: HCP_ID
+              type: string
+              references: hcp_master.Prescriber_NPI
+            - name: Engagement_Date
+              type: timestamp
+            - name: Channel
+              type: string
+              description: "Values: Email, Webinar"
+            - name: Email_Sent
+              type: integer
+            - name: Email_Opened
+              type: integer
+            - name: Email_Clicked
+              type: integer
+            - name: Webinar_Minutes
+              type: integer
+            - name: Campaign_ID
+              type: string
+              references: campaign_master.campaign_id
+
+        - name: Reverse_Claims
+          description: >
+            Transaction log for reverse claim events. Currently only 1 row (test data).
+            For robust claims analysis, prefer copay_Claims_Transactions (713 rows) instead.
+          columns:
+            - name: id
+              type: primary_key
+            - name: Transaction_ID
+              type: string
+            - name: Timestamp
+              type: timestamp
+            - name: Patient_Token
+              type: string
+            - name: Prescriber_NPI
+              type: string
+            - name: Pharmacy_ID
+              type: string
+            - name: NDC_Code
+              type: string
+            - name: Payer_BIN
+              type: string
+            - name: Response_Status
+              type: string
+            - name: Reject_Code
+              type: string
+            - name: Reject_Message
+              type: string
+            - name: Created_At
+              type: timestamp
+
+        - name: Reject_Code_Master
+          description: "Reference table: Reject code directory. 200 rows. Severities: Critical, High, Medium, Low."
+          columns:
+            - name: reject_code
+              type: primary_key
+            - name: reject_description
+              type: string
+            - name: severity
+              type: string
+              description: "Values: Critical, High, Medium, Low"
+
+        - name: territory_master
+          description: "Reference table: Territory alignment master. 120 rows. 10 states, 6 segments."
+          columns:
+            - name: id
+              type: primary_key
+            - name: alignment_id
+              type: string
+            - name: effective_date
+              type: date
+            - name: territory_id
+              type: string
+            - name: rep_id
+              type: string
+            - name: state
+              type: string
+            - name: zip_prefix
+              type: string
+            - name: segment
+              type: string
+              description: "Values: Neurology, Gastroenterology, Immunology, Pulmonology, Cardiology, Dermatology"
+            - name: priority_flag
+              type: string
+            - name: manager_name
+              type: string
+            - name: status
+              type: string
+
+  # ============================================================
+  # VERIFIED JOIN PATHS (Only joins confirmed to return data)
+  # ============================================================
+  joins:
+    - name: copay_to_hcp
+      left_table: copay_Claims_Transactions
+      right_table: hcp_master
+      join_condition: "copay_Claims_Transactions.Prescriber_NPI = hcp_master.Prescriber_NPI"
+      description: "Verified: 713 matching rows. Resolves full HCP profile from copay claims."
+
+    - name: copay_to_payer
+      left_table: copay_Claims_Transactions
+      right_table: Payer_Master
+      join_condition: "copay_Claims_Transactions.payer_id = Payer_Master.payer_id"
+      description: "Verified: 713 matching rows. Resolves payer name, type, and region."
+
+    - name: copay_to_reject_code
+      left_table: copay_Claims_Transactions
+      right_table: Reject_Code_Master
+      join_condition: "copay_Claims_Transactions.reject_code = Reject_Code_Master.reject_code"
+      description: "Verified: 178 matching rows. Resolves reject description and severity."
+
+    - name: engagement_to_campaign
+      left_table: hcp_engagement_logs
+      right_table: campaign_master
+      join_condition: "hcp_engagement_logs.Campaign_ID = campaign_master.campaign_id"
+      description: "Verified: 42 matching rows. Resolves campaign name, type, channel."
+
+    - name: engagement_to_hcp
+      left_table: hcp_engagement_logs
+      right_table: hcp_master
+      join_condition: "hcp_engagement_logs.HCP_ID = hcp_master.Prescriber_NPI"
+      description: "Verified: 42 matching rows. Resolves physician name and specialty."
+
+    - name: compliance_to_payer
+      left_table: Compliance_Table
+      right_table: Payer_Master
+      join_condition: "Compliance_Table.Payer_id = Payer_Master.payer_id"
+      description: "Verified: 111 matching rows. Resolves payer name and type."
+
+    - name: leakage_to_product
+      left_table: Leakage_Activity
+      right_table: Product_Master
+      join_condition: "Leakage_Activity.productid = Product_Master.product_id"
+      description: "Enriches leakage records with full product catalog details."
+
+  # ============================================================
+  # BUSINESS TO DATABASE MAPPING RULES (STRICT)
+  # ============================================================
+  mapping_rules:
+    - category: "Leakage Metrics (UC1 Primary)"
+      rule: >
+        ALL leakage queries (leakage %, top leakage, leakage count, leakage by zip/HCP/state,
+        pharmacy rejections, rejected count, prescription drop-offs) MUST use `Leakage_Activity`.
+        This table has PRE-RESOLVED columns: HCP_Name, BrandName, State — so JOINs to hcp_master
+        or Zip_Geography_Master are usually UNNECESSARY. Use `Leakage_Percentage` for leakage %,
+        `Pharmacy_Rejections` for rejection count.
+
+    - category: "Fatigue Scores (UC2 Primary)"
+      rule: >
+        ALL fatigue queries MUST use `fatigue_score` DIRECTLY. It already contains HCP_Name, Product,
+        Campaign_Name, and Fatigue. DO NOT JOIN hcp_master, Product_Master, or campaign_master.
+        Fatigue range is 10-60 (not 0-100). Flag physicians above 45 as high fatigue.
+
+    - category: "Copay Claims & Transactions"
+      rule: >
+        ALL copay, claims, claim amount, claim status, reject code, reject message, or transaction-level
+        queries MUST use `copay_Claims_Transactions` (713 rows). DO NOT use `Reverse_Claims` (only 1 test row).
+        Response_Status values: V=Verified, R=Rejected, A=Approved. claim_status values: PAID, REJECTED.
+        This table has denormalized HCP columns (HCP_First_Name, HCP_Last_Name, HCP_Specialty, HCP_Practice_State).
+        JOIN with `Payer_Master` ON payer_id for payer details. JOIN with `Reject_Code_Master` ON reject_code for severity.
+
+    - category: "Leakage Threshold History"
+      rule: >
+        ONLY for leakage limit, leakage threshold, history of changes, audit history, who updated.
+        Use `leakage_history` table. Latest limit: SELECT new_value FROM leakage_history ORDER BY updated_at DESC LIMIT 1.
+        Does NOT contain leakage percentage data.
+
+    - category: "Compliance & Government Plans"
+      rule: >
+        Queries about government plans, Medicaid, Medicare, bypassed records, or compliance violations
+        MUST use `Compliance_Table`. JOIN with `Payer_Master` ON Payer_id = payer_id for payer details.
+
+    - category: "HCP Specialty & Contact Info"
+      rule: >
+        For physician specialty, email, phone, fax, or license info, query `hcp_master`.
+        Full name = CONCAT(hcp_firstName, ' ', hcp_lastName). Specialties: 18 types including
+        Cardiology, Oncology, Neurology, etc. Practice states: TX, TN, KA.
+
+    - category: "Email & Engagement Metrics"
+      rule: >
+        For email open rates, webinar minutes, engagement channels, use `hcp_engagement_logs`.
+        JOIN `campaign_master` ON Campaign_ID for campaign details.
+        JOIN `hcp_master` ON HCP_ID = Prescriber_NPI for physician names.
+        Channels available: Email, Webinar.
+
+    - category: "Campaign Details"
+      rule: >
+        For campaign budget, target audience, channel, status, use `campaign_master` directly.
+        Statuses: Active, Completed, Planned, Cancelled. 8 channels, 10 types.
+
+    - category: "Column Name Safety"
+      rule: >
+        NEVER invent column names. Key rules:
+        1) `Product_Master.brand_name` is lowercase; `Leakage_Activity.BrandName` is camelCase.
+        2) NEVER join Prescriber_NPI to HCP_Name (ID vs string — will never match).
+        3) Payer_Type does NOT exist on Leakage_Activity (use Compliance_Table or Payer_Master).
+        4) Rejection_Root_Cause does NOT exist on any table (use reject_code/Reject_Message).
+        5) 'leakage' column does NOT exist (use Leakage_Percentage).
+
+    - category: "Data Freshness"
+      rule: >
+        Data was seeded around early July 2026. Do NOT use CURDATE(), 'today', 'this week',
+        or 'last 7 days' filters as they will return 0 results. Use the full dataset without
+        date filtering unless the user specifically requests a date range.
+
+  # ============================================================
+  # PRE-DEFINED SQL MEASURES (Verified to return data)
+  # ============================================================
+  measures:
+    # --- UC1: Leakage Signals ---
+    - name: top_leakage_by_hcp
+      description: "Top HCPs by leakage percentage"
+      sql: "SELECT HCP_Name, BrandName, State, Pharmacy_Rejections, Leakage_Percentage FROM Leakage_Activity ORDER BY Leakage_Percentage DESC"
+
+    - name: leakage_by_state
+      description: "Leakage summary grouped by state"
+      sql: "SELECT State, COUNT(*) as record_count, SUM(Pharmacy_Rejections) as total_rejections, AVG(Leakage_Percentage) as avg_leakage_pct FROM Leakage_Activity GROUP BY State ORDER BY total_rejections DESC"
+
+    - name: latest_leakage_limit
+      description: "Gets the latest leakage threshold value"
+      sql: "SELECT new_value FROM leakage_history ORDER BY updated_at DESC LIMIT 1"
+
+    - name: leakage_threshold_history
+      description: "Full audit trail of leakage threshold changes"
+      sql: "SELECT previous_value, new_value, updated_by, updated_at FROM leakage_history ORDER BY updated_at DESC"
+
+    # --- UC1: Copay Claims Analysis ---
+    - name: rejected_claims_by_specialty
+      description: "Rejected copay claims grouped by physician specialty"
+      sql: "SELECT HCP_Specialty, COUNT(*) as rejected_count, SUM(claim_amount) as total_amount FROM copay_Claims_Transactions WHERE claim_status = 'REJECTED' GROUP BY HCP_Specialty ORDER BY rejected_count DESC"
+
+    - name: claims_by_payer_type
+      description: "Copay claims breakdown by payer type"
+      sql: "SELECT pm.payer_type, cct.claim_status, COUNT(*) as claim_count, SUM(cct.claim_amount) as total_amount FROM copay_Claims_Transactions cct JOIN Payer_Master pm ON cct.payer_id = pm.payer_id GROUP BY pm.payer_type, cct.claim_status ORDER BY claim_count DESC"
+
+    - name: rejected_claims_with_severity
+      description: "Rejected claims with reject code descriptions and severity"
+      sql: "SELECT cct.reject_code, rcm.reject_description, rcm.severity, COUNT(*) as count, SUM(cct.claim_amount) as total_amount FROM copay_Claims_Transactions cct JOIN Reject_Code_Master rcm ON cct.reject_code = rcm.reject_code WHERE cct.claim_status = 'REJECTED' GROUP BY cct.reject_code, rcm.reject_description, rcm.severity ORDER BY count DESC"
+
+    - name: top_claims_by_amount
+      description: "Top copay claims by dollar amount with physician details"
+      sql: "SELECT cct.Transaction_ID, cct.BrandName, cct.claim_amount, cct.claim_status, cct.HCP_First_Name, cct.HCP_Last_Name, cct.HCP_Specialty, cct.HCP_Practice_State FROM copay_Claims_Transactions cct ORDER BY cct.claim_amount DESC"
+
+    # --- UC2: Journey Orchestration ---
+    - name: hcp_fatigue_summary
+      description: "All HCP fatigue scores"
+      sql: "SELECT HCP_Name, Product, Campaign_Name, Fatigue FROM fatigue_score ORDER BY Fatigue DESC"
+
+    - name: email_open_rate_by_campaign
+      description: "Email open rate per campaign"
+      sql: "SELECT cm.campaign_name, SUM(hel.Email_Sent) as total_sent, SUM(hel.Email_Opened) as total_opened, ROUND(SUM(hel.Email_Opened) / NULLIF(SUM(hel.Email_Sent), 0) * 100, 2) as open_rate_pct FROM hcp_engagement_logs hel JOIN campaign_master cm ON hel.Campaign_ID = cm.campaign_id GROUP BY cm.campaign_name ORDER BY open_rate_pct DESC"
+
+    - name: hcp_specialty_distribution
+      description: "Physician count by specialty"
+      sql: "SELECT specialty, COUNT(*) as hcp_count FROM hcp_master GROUP BY specialty ORDER BY hcp_count DESC"
+
+    - name: compliance_by_payer
+      description: "Compliance violations by payer name and type"
+      sql: "SELECT pm.payer_name, pm.payer_type, pm.region, COUNT(*) as violation_count FROM Compliance_Table ct JOIN Payer_Master pm ON ct.Payer_id = pm.payer_id GROUP BY pm.payer_name, pm.payer_type, pm.region ORDER BY violation_count DESC"
+
+    - name: campaign_budget_by_channel
+      description: "Campaign budget allocation by channel"
+      sql: "SELECT channel, COUNT(*) as campaign_count, SUM(budget_amount) as total_budget, AVG(budget_amount) as avg_budget FROM campaign_master GROUP BY channel ORDER BY total_budget DESC"
