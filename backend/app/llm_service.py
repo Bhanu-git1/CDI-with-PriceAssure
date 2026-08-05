@@ -138,7 +138,7 @@ class LLMService:
             "  1. `Leakage_Activity` (60 rows): HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage, productid. (Use for ALL claims, rejection claims, pharmacy rejections, brand rejections, and leakage queries).\n"
             "  2. `leakage_history` (13 rows): id, previous_value, new_value, updated_by, updated_at.\n"
             "  3. `copay_Claims_Transactions` (713 rows): DO NOT use for claims or rejection queries. Use Leakage_Activity instead.\n"
-            "  4. `fatigue_score` (49 rows): Fatigue_ID, HCP_Name, Fatigue (range 10-60), Product, Campaign_Name. (NO JOINs needed).\n"
+            "  4. `fatigue_score` (49 rows): Fatigue_ID, HCP_Name, Fatigue (range 10-60 where 60 is 100% max fatigue), Product, Campaign_Name. For percentage prompts (e.g. 'more than 90% fatigue'), calculate `CONCAT(ROUND((Fatigue / 60.0) * 100, 1), '%') as fatigue_percentage` and filter `WHERE Fatigue > 54` (or `(Fatigue / 60.0) * 100 > 90`). (NO JOINs needed).\n"
             "  5. `Compliance_Table` (111 rows): id, Patient_Token, Payer_id, Payer_Type ('Medicaid','Medicare'), Created_At.\n"
             "  6. `hcp_engagement_logs` (42 rows): Log_ID, HCP_ID (FK: Prescriber_NPI), Engagement_Date, Channel ('Email','Webinar'), Email_Sent, Email_Opened, Email_Clicked, Webinar_Minutes, Campaign_ID.\n"
             "  7. `campaign_master` (100 rows): campaign_id, campaign_name, campaign_type, campaign_category, channel ('Email','Webinar',etc.), product_id, brand_name, target_audience, target_specialty, target_segment, budget_amount, expected_reach, status.\n"
