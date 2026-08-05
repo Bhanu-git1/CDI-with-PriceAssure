@@ -595,13 +595,14 @@ semantic_model:
   # BUSINESS TO DATABASE MAPPING RULES (STRICT)
   # ============================================================
   mapping_rules:
-    - category: "Leakage Metrics (UC1 Primary)"
+    - category: "Leakage & Claims Rejections (Primary)"
       rule: >
-        ALL leakage queries (leakage %, top leakage, leakage count, leakage by zip/HCP/state,
-        pharmacy rejections, rejected count, prescription drop-offs) MUST use `Leakage_Activity`.
-        This table has PRE-RESOLVED columns: HCP_Name, BrandName, State — so JOINs to hcp_master
-        or Zip_Geography_Master are usually UNNECESSARY. Use `Leakage_Percentage` for leakage %,
-        `Pharmacy_Rejections` for rejection count.
+        ALL claims, rejection claims, claim rejections, pharmacy rejections, brand rejections, total rejections,
+        leakage %, top leakage, and prescription drop-off queries MUST use `Leakage_Activity`.
+        DO NOT use `copay_Claims_Transactions` for claim or rejection prompts.
+        This table has PRE-RESOLVED columns: HCP_Name, BrandName, State, Pharmacy_ID, zip_code, Prescriber_NPI,
+        Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage.
+        Use `Pharmacy_Rejections` or `Total_Brand_Rejections` for rejection claims data.
 
     - category: "Fatigue Scores (UC2 Primary)"
       rule: >
@@ -609,13 +610,11 @@ semantic_model:
         Campaign_Name, and Fatigue. DO NOT JOIN hcp_master, Product_Master, or campaign_master.
         Fatigue range is 10-60 (not 0-100). Flag physicians above 45 as high fatigue.
 
-    - category: "Copay Claims & Transactions"
+    - category: "Claims & Rejections Mandate"
       rule: >
-        ALL copay, claims, claim amount, claim status, reject code, reject message, or transaction-level
-        queries MUST use `copay_Claims_Transactions` (713 rows). DO NOT use `Reverse_Claims` (only 1 test row).
-        Response_Status values: V=Verified, R=Rejected, A=Approved. claim_status values: PAID, REJECTED.
-        This table has denormalized HCP columns (HCP_First_Name, HCP_Last_Name, HCP_Specialty, HCP_Practice_State).
-        JOIN with `Payer_Master` ON payer_id for payer details. JOIN with `Reject_Code_Master` ON reject_code for severity.
+        DO NOT use `copay_Claims_Transactions` for any claim-related or rejection-related queries.
+        Always route claims and rejection keywords to `Leakage_Activity` which stores `Pharmacy_Rejections`
+        and `Total_Brand_Rejections`.
 
     - category: "Leakage Threshold History"
       rule: >

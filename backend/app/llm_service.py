@@ -36,16 +36,16 @@ UI DASHBOARD displays data from PRIMARY TABLES:
   7. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
   8. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
 
-PRIMARY TRANSACTION TABLE for claims analysis:
-  9. copay_Claims_Transactions (713 rows) — Use for ALL copay/claims/reject queries
-     Response_Status: V=Verified(249), R=Rejected(237), A=Approved(227)
-     claim_status: PAID, REJECTED
+PRIMARY TABLE FOR CLAIMS & REJECTIONS ANALYSIS:
+  1. Leakage_Activity (60 rows) — Use for ALL claims, rejection claims, pharmacy rejections, brand rejections, and leakage queries.
+     Columns: HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage.
 
-WARNING: Reverse_Claims has only 1 test row. DO NOT use it for claims analysis.
+WARNING: DO NOT use copay_Claims_Transactions or Reverse_Claims for claims/rejections analysis. Use Leakage_Activity instead.
 
 RULES:
 - ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
 - NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- For ALL claims, claim rejections, rejected claims, or rejection keywords, ALWAYS use `Leakage_Activity` (Pharmacy_Rejections, Total_Brand_Rejections). DO NOT use `copay_Claims_Transactions`.
 - Use standard MySQL SQL syntax.
 - Use ONLY the VERIFIED JOIN PATHS defined in the governance block.
 - Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master, hmd = hcp_master_details, hmwh = hcp_master_workdetails_history, rd = rep_details, rm = rep_master.
@@ -135,9 +135,9 @@ class LLMService:
             "STRICT TABLE & COLUMN SELECTION MANDATE:\n"
             "You MUST strictly follow the BUSINESS TO DATABASE MAPPING RULES listed above.\n\n"
             "TABLE SELECTION QUICK REFERENCE & EXACT COLUMN SCHEMAS:\n"
-            "  1. `Leakage_Activity` (60 rows): HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage, productid. (PRE-RESOLVED — no JOINs needed for basic leakage queries).\n"
+            "  1. `Leakage_Activity` (60 rows): HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage, productid. (Use for ALL claims, rejection claims, pharmacy rejections, brand rejections, and leakage queries).\n"
             "  2. `leakage_history` (13 rows): id, previous_value, new_value, updated_by, updated_at.\n"
-            "  3. `copay_Claims_Transactions` (713 rows): Transaction_ID, transaction_datetime, Patient_Token, Prescriber_NPI, Pharmacy_ID, Response_Status ('V','R','A'), zip_code, payer_id, product_id, claim_status ('PAID','REJECTED'), reject_code, Reject_Message, claim_amount, BrandName, HCP_First_Name, HCP_Last_Name, HCP_Specialty, HCP_Practice_State. (NEVER use Reverse_Claims!).\n"
+            "  3. `copay_Claims_Transactions` (713 rows): DO NOT use for claims or rejection queries. Use Leakage_Activity instead.\n"
             "  4. `fatigue_score` (49 rows): Fatigue_ID, HCP_Name, Fatigue (range 10-60), Product, Campaign_Name. (NO JOINs needed).\n"
             "  5. `Compliance_Table` (111 rows): id, Patient_Token, Payer_id, Payer_Type ('Medicaid','Medicare'), Created_At.\n"
             "  6. `hcp_engagement_logs` (42 rows): Log_ID, HCP_ID (FK: Prescriber_NPI), Engagement_Date, Channel ('Email','Webinar'), Email_Sent, Email_Opened, Email_Clicked, Webinar_Minutes, Campaign_ID.\n"
@@ -151,7 +151,7 @@ class LLMService:
             "  14. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
             "CRITICAL RULES:\n"
             "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims, hcp_master_details, hcp_master_workdetails_history, rep_details, rep_master.\n"
-            "  - NEVER USE Reverse_Claims for claims analysis. It has only 1 test row and its NPI/NDC formats do not match other tables.\n"
+            "  - DO NOT USE copay_Claims_Transactions or Reverse_Claims for any claim or rejection queries. ALWAYS use Leakage_Activity (Pharmacy_Rejections, Total_Brand_Rejections) for all claims and rejection prompts.\n"
             "  - NEVER invent column names.\n"
             "  - For cross-table keyword search (e.g. 'Search for Endocrinology in the database', 'Look up Nancy everywhere', 'Find any record containing TX across all tables'), call Python code: `data = json.loads(db.search_records('search_term'))` and store `result = {'sql': 'CROSS_TABLE_SEARCH: search_term', 'records': data.get('records', [])}`.\n"
             "  - When user asks for 'today\'s' records or data for today, ALWAYS filter strictly using `CURDATE()` on the relevant date column: `WHERE DATE(Processed_TimeStamp) = CURDATE()`.\n\n"
