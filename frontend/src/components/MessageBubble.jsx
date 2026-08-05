@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import DataTable from './DataTable';
-import DataChart from './DataChart';
 
 export default function MessageBubble({ message }) {
   const { sender, text, sql, data, error } = message;
@@ -37,12 +36,6 @@ export default function MessageBubble({ message }) {
               >
                 📊 Table View
               </button>
-              <button
-                className={`vis-tab ${activeTab === 'chart' ? 'active' : ''}`}
-                onClick={() => setActiveTab('chart')}
-              >
-                📈 Bar Chart
-              </button>
             </div>
 
             <div className="vis-content">
@@ -51,9 +44,6 @@ export default function MessageBubble({ message }) {
               )}
               {activeTab === 'table' && (
                 <DataTable data={data} />
-              )}
-              {activeTab === 'chart' && (
-                <DataChart data={data} />
               )}
             </div>
           </div>
