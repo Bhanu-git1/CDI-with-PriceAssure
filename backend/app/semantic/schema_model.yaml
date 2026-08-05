@@ -604,13 +604,14 @@ semantic_model:
         Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage.
         Use `Pharmacy_Rejections` or `Total_Brand_Rejections` for rejection claims data.
 
-    - category: "Fatigue Scores & Fatigue Percentages"
+    - category: "Fatigue Scores & Dynamic Fatigue Percentages"
       rule: >
-        ALL fatigue queries MUST use `fatigue_score` DIRECTLY. It contains HCP_Name, Product, Campaign_Name, and Fatigue.
-        The raw `Fatigue` column range is 10 to 60 (where 60 is max 100% fatigue).
-        When the user asks for percentage thresholds (e.g. 'more than 90% fatigue' or 'fatigue %'),
-        calculate the percentage using `CONCAT(ROUND((Fatigue / 60.0) * 100, 1), '%') as fatigue_percentage`
-        and filter using `WHERE (Fatigue / 60.0) * 100 > 90` (or `WHERE Fatigue > 54`).
+        ALL fatigue queries MUST use `fatigue_score` DIRECTLY (HCP_Name, Product, Campaign_Name, Fatigue).
+        DO NOT hardcode static numbers like 60 or 54.
+        Dynamically calculate percentage against the maximum fatigue value in the database using a subquery:
+        `CONCAT(ROUND((Fatigue / (SELECT MAX(Fatigue) FROM fatigue_score)) * 100, 1), '%') as fatigue_percentage`
+        When user asks for percentage thresholds (e.g. 'more than 90% fatigue' or '> 90%'), filter dynamically:
+        `WHERE (Fatigue / (SELECT MAX(Fatigue) FROM fatigue_score)) * 100 > 90`
 
     - category: "Claims & Rejections Mandate"
       rule: >
@@ -728,8 +729,8 @@ semantic_model:
       sql: "SELECT HCP_Name, Product, Campaign_Name, Fatigue FROM fatigue_score ORDER BY Fatigue DESC"
 
     - name: hcp_fatigue_percentage
-      description: "HCP fatigue score converted to percentage (>90% threshold)"
-      sql: "SELECT HCP_Name, Fatigue as raw_score, CONCAT(ROUND((Fatigue / 60.0) * 100, 1), '%') as fatigue_percentage, Product, Campaign_Name FROM fatigue_score WHERE (Fatigue / 60.0) * 100 > 90 ORDER BY Fatigue DESC"
+      description: "HCP fatigue score converted to percentage (>90% threshold) using dynamic MAX subquery"
+      sql: "SELECT HCP_Name, Fatigue as raw_score, CONCAT(ROUND((Fatigue / (SELECT MAX(Fatigue) FROM fatigue_score)) * 100, 1), '%') as fatigue_percentage, Product, Campaign_Name FROM fatigue_score WHERE (Fatigue / (SELECT MAX(Fatigue) FROM fatigue_score)) * 100 > 90 ORDER BY Fatigue DESC"
 
     - name: email_open_rate_by_campaign
       description: "Email open rate per campaign"
