@@ -24,16 +24,20 @@ semantic_loader = SemanticModelLoader()
 
 SYSTEM_PROMPT = """
 You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
-The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals) and UC2 (Journey Orchestration).
+The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals), UC2 (Journey Orchestration), and UC3 (Voice Work Detail Manager & HCP Interaction Recording).
 
-UI DASHBOARD displays data from 4 PRIMARY TABLES:
+UI DASHBOARD displays data from PRIMARY TABLES:
   1. Leakage_Activity (60 rows) — Main leakage records table
   2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60)
   3. leakage_history (13 rows) — Threshold update log
   4. Compliance_Table (111 rows) — Govt plans bypassed KPI
+  5. hcp_master_details — Main UC3 table (Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, sf_id)
+  6. hcp_master_workdetails_history — UC3 audit trail history table (history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime)
+  7. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
+  8. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
 
 PRIMARY TRANSACTION TABLE for claims analysis:
-  5. copay_Claims_Transactions (713 rows) — Use for ALL copay/claims/reject queries
+  9. copay_Claims_Transactions (713 rows) — Use for ALL copay/claims/reject queries
      Response_Status: V=Verified(249), R=Rejected(237), A=Approved(227)
      claim_status: PAID, REJECTED
 
@@ -44,8 +48,8 @@ RULES:
 - NEVER invent table or column names. Use ONLY columns listed in the governance block.
 - Use standard MySQL SQL syntax.
 - Use ONLY the VERIFIED JOIN PATHS defined in the governance block.
-- Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
-- Data was seeded ~July 2026. Do NOT add date filters like CURDATE() or 'today' unless user explicitly asks for a specific date range.
+- Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master, hmd = hcp_master_details, hmwh = hcp_master_workdetails_history, rd = rep_details, rm = rep_master.
+- When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 """
 
@@ -135,27 +139,34 @@ class LLMService:
             "  2. `leakage_history` (13 rows): id, previous_value, new_value, updated_by, updated_at.\n"
             "  3. `copay_Claims_Transactions` (713 rows): Transaction_ID, transaction_datetime, Patient_Token, Prescriber_NPI, Pharmacy_ID, Response_Status ('V','R','A'), zip_code, payer_id, product_id, claim_status ('PAID','REJECTED'), reject_code, Reject_Message, claim_amount, BrandName, HCP_First_Name, HCP_Last_Name, HCP_Specialty, HCP_Practice_State. (NEVER use Reverse_Claims!).\n"
             "  4. `fatigue_score` (49 rows): Fatigue_ID, HCP_Name, Fatigue (range 10-60), Product, Campaign_Name. (NO JOINs needed).\n"
-            "  5. `Compliance_Table` (111 rows): id, Patient_Token, Payer_id, Payer_Type ('Medicaid','Medicare'), Created_At. (Stores all excluded govt plan claims directly; Created_At is the violation timestamp. DO NOT filter on non-existent 'excluded' column!).\n"
+            "  5. `Compliance_Table` (111 rows): id, Patient_Token, Payer_id, Payer_Type ('Medicaid','Medicare'), Created_At.\n"
             "  6. `hcp_engagement_logs` (42 rows): Log_ID, HCP_ID (FK: Prescriber_NPI), Engagement_Date, Channel ('Email','Webinar'), Email_Sent, Email_Opened, Email_Clicked, Webinar_Minutes, Campaign_ID.\n"
             "  7. `campaign_master` (100 rows): campaign_id, campaign_name, campaign_type, campaign_category, channel ('Email','Webinar',etc.), product_id, brand_name, target_audience, target_specialty, target_segment, budget_amount, expected_reach, status.\n"
             "  8. `hcp_master` (103 rows): id, Prescriber_NPI, hcp_firstName, hcp_lastName, specialty, practice_state, practice_zip, phone, secure_fax. (Full HCP Name = CONCAT(hcp_firstName, ' ', hcp_lastName)).\n"
-            "  9. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
-            "  10. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
+            "  9. `hcp_master_details` (UC3 Primary): hcp_detail_id, hcp_id, Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status ('Completed','In-Progress'), work_detail, sf_id, created_at, updated_at.\n"
+            "  10. `hcp_master_workdetails_history` (UC3 Audit): history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime.\n"
+            "  11. `rep_details` (UC3 Reps): rep_id, rep_firstName, rep_lastName, email, phone, manager_id.\n"
+            "  12. `rep_master` (UC3 Managers): rep_id, rep_firstName, rep_lastName, email, phone.\n"
+            "  13. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
+            "  14. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
             "CRITICAL RULES:\n"
-            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims.\n"
+            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims, hcp_master_details, hcp_master_workdetails_history, rep_details, rep_master.\n"
             "  - NEVER USE Reverse_Claims for claims analysis. It has only 1 test row and its NPI/NDC formats do not match other tables.\n"
-            "  - NEVER invent column names. Key facts: (a) Leakage_Activity uses `BrandName` (camelCase), Product_Master uses `brand_name` (lowercase). (b) Leakage_Activity does NOT have Payer_Type or Rejection_Root_Cause columns. (c) leakage_history does NOT have a 'leakage' column. (d) hcp_master does NOT have a 'name' column.\n"
-            "  - NEVER join Prescriber_NPI to HCP_Name (ID vs string — 0 matches).\n"
-            "  - Do NOT add CURDATE() or date filters unless user explicitly asks for a specific date range.\n\n"
-            "VERIFIED JOIN PATHS (These are the ONLY joins that return data):\n"
-            "  - copay_Claims_Transactions.Prescriber_NPI = hcp_master.Prescriber_NPI (713 matches)\n"
-            "  - copay_Claims_Transactions.payer_id = Payer_Master.payer_id (713 matches)\n"
-            "  - copay_Claims_Transactions.reject_code = Reject_Code_Master.reject_code (178 matches)\n"
-            "  - hcp_engagement_logs.Campaign_ID = campaign_master.campaign_id (42 matches)\n"
-            "  - hcp_engagement_logs.HCP_ID = hcp_master.Prescriber_NPI (42 matches)\n"
-            "  - Compliance_Table.Payer_id = Payer_Master.payer_id (111 matches)\n"
-            "  - Leakage_Activity.productid = Product_Master.product_id (60 matches)\n\n"
-
+            "  - NEVER invent column names.\n"
+            "  - For cross-table keyword search (e.g. 'Search for Endocrinology in the database', 'Look up Nancy everywhere', 'Find any record containing TX across all tables'), call Python code: `data = json.loads(db.search_records('search_term'))` and store `result = {'sql': 'CROSS_TABLE_SEARCH: search_term', 'records': data.get('records', [])}`.\n"
+            "  - When user asks for 'today\'s' records or data for today, ALWAYS filter strictly using `CURDATE()` on the relevant date column: `WHERE DATE(Processed_TimeStamp) = CURDATE()`.\n\n"
+            "VERIFIED JOIN PATHS:\n"
+            "  - copay_Claims_Transactions.Prescriber_NPI = hcp_master.Prescriber_NPI\n"
+            "  - hcp_master_details.Prescriber_NPI = hcp_master.Prescriber_NPI\n"
+            "  - hcp_master_details.hcp_id = hcp_master_workdetails_history.hcp_id\n"
+            "  - hcp_master_details.rep_id = rep_details.rep_id\n"
+            "  - rep_details.manager_id = rep_master.rep_id\n"
+            "  - copay_Claims_Transactions.payer_id = Payer_Master.payer_id\n"
+            "  - copay_Claims_Transactions.reject_code = Reject_Code_Master.reject_code\n"
+            "  - hcp_engagement_logs.Campaign_ID = campaign_master.campaign_id\n"
+            "  - hcp_engagement_logs.HCP_ID = hcp_master.Prescriber_NPI\n"
+            "  - Compliance_Table.Payer_id = Payer_Master.payer_id\n"
+            "  - Leakage_Activity.productid = Product_Master.product_id\n\n"
             "You write Python code to fetch or analyze data from a MySQL database via the whitelisted 'db' global object.\n"
             "The available 'db' methods are:\n"
             "  - db.execute_sql(sql_query: str) -> str: Runs read-only SQL SELECT. Returns a JSON string with 'records' and 'totalSize'. Must parse with json.loads().\n"
@@ -163,32 +174,23 @@ class LLMService:
             "  - db.list_tables() -> str: Returns list of tables in the database.\n"
             "  - db.search_records(search_term: str) -> str: Runs cross-table text search. Returns JSON. Must parse with json.loads().\n\n"
             "Rules for writing code:\n"
-            "  1. You MUST execute queries using db.execute_sql(). DO NOT hardcode empty lists or mock data.\n"
+            "  1. You MUST execute queries using db.execute_sql() or db.search_records(). DO NOT hardcode empty lists or mock data.\n"
             "  2. Parse the returned JSON string using json.loads() to access records.\n"
             "  3. Store final output in variable 'result' = {'sql': '<query_string>', 'records': <records_list>}.\n"
             "  4. Global scope has 'db', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
             "  5. Write valid multi-line Python code with proper line breaks.\n"
             "  6. When a PRE-DEFINED SQL MEASURE matches the user's question, adapt it as your template.\n\n"
-            "Example 1 - Leakage percentage (uses Leakage_Activity, no JOINs):\n"
-            "sql = \"SELECT HCP_Name, BrandName, Leakage_Percentage, Pharmacy_Rejections, State FROM Leakage_Activity ORDER BY Leakage_Percentage DESC\"\n"
+            "Example 1 - UC3 Work details (uses hcp_master_details):\n"
+            "sql = \"SELECT hcp_firstName, hcp_lastName, Prescriber_NPI, rep_id, status, work_detail, updated_at FROM hcp_master_details ORDER BY updated_at DESC\"\n"
             "data = json.loads(db.execute_sql(sql))\n"
             "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
-            "Example 2 - Rejected copay claims with severity (uses copay_Claims_Transactions + Reject_Code_Master):\n"
-            "sql = \"SELECT cct.Transaction_ID, cct.BrandName, cct.claim_amount, cct.reject_code, rcm.reject_description, rcm.severity FROM copay_Claims_Transactions cct JOIN Reject_Code_Master rcm ON cct.reject_code = rcm.reject_code WHERE cct.claim_status = 'REJECTED' ORDER BY cct.claim_amount DESC\"\n"
+            "Example 2 - UC3 Audit History (uses hcp_master_workdetails_history):\n"
+            "sql = \"SELECT history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime FROM hcp_master_workdetails_history ORDER BY updated_datetime DESC\"\n"
             "data = json.loads(db.execute_sql(sql))\n"
             "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
-            "Example 3 - Claims by payer type (uses copay_Claims_Transactions + Payer_Master):\n"
-            "sql = \"SELECT pm.payer_type, cct.claim_status, COUNT(*) as claim_count, SUM(cct.claim_amount) as total_amount FROM copay_Claims_Transactions cct JOIN Payer_Master pm ON cct.payer_id = pm.payer_id GROUP BY pm.payer_type, cct.claim_status ORDER BY claim_count DESC\"\n"
-            "data = json.loads(db.execute_sql(sql))\n"
-            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
-            "Example 4 - HCP fatigue scores (uses fatigue_score, NO JOINs):\n"
-            "sql = \"SELECT HCP_Name, Fatigue, Product, Campaign_Name FROM fatigue_score ORDER BY Fatigue DESC\"\n"
-            "data = json.loads(db.execute_sql(sql))\n"
-            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
-            "Example 5 - Compliance violations by payer (uses Compliance_Table + Payer_Master):\n"
-            "sql = \"SELECT pm.payer_name, pm.payer_type, pm.region, COUNT(*) as violation_count FROM Compliance_Table ct JOIN Payer_Master pm ON ct.Payer_id = pm.payer_id GROUP BY pm.payer_name, pm.payer_type, pm.region ORDER BY violation_count DESC\"\n"
-            "data = json.loads(db.execute_sql(sql))\n"
-            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 3 - Cross-table text search:\n"
+            "data = json.loads(db.search_records('Nancy'))\n"
+            "result = {\"sql\": \"CROSS_TABLE_SEARCH: Nancy\", \"records\": data.get(\"records\", [])}\n\n"
             "Format your output ONLY as a JSON object with these keys:\n"
             "{\n"
             "  \"reasoning\": \"your reasoning/steps\",\n"

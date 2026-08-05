@@ -131,7 +131,7 @@ export default function App() {
                   </linearGradient>
                 </defs>
               </svg>
-              <h1>MySQL Data Assistant</h1>
+              <h1>Rx Leakage Command Center</h1>
             </div>
           </div>
           <div className="chat-header-status">
@@ -241,39 +241,45 @@ export default function App() {
                   </defs>
                 </svg>
               </div>
-              <h3>MySQL Database Assistant 🗄️</h3>
+              <h3>Rx Leakage Command Center 🏥</h3>
               <p>
-                Ask questions about users, products, orders, and order items in plain English. The AI will translate your question into a SQL query, execute it against your MySQL database, and display results in real-time!
+                Ask questions about Leakage Signals, Journey Orchestration & HCP Fatigue, and Voice Work Detail & Interaction Recording. The AI will translate your questions into governed SQL and display real-time analytics!
               </p>
 
               <div style={{ width: '100%', marginTop: '24px' }}>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '12px', fontWeight: '600' }}>
-                  TRY ASKING ABOUT YOUR DATABASE:
+                  SUGGESTED QUERIES:
                 </p>
                 <div className="suggested-queries">
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("show all active users")}
+                    onClick={() => handleSendMessage("Show the top 10 physician leakage records")}
                   >
-                    👤 Show all active users
+                    📉 Top 10 physician leakage records
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("list all shipped orders with customer names")}
+                    onClick={() => handleSendMessage("List all physicians flagged with a digital fatigue score above 45")}
                   >
-                    📦 Shipped orders with customer names
+                    ⚡ Physicians with fatigue score above 45
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("what are the top selling products by quantity?")}
+                    onClick={() => handleSendMessage("Show all doctors assigned to representative ID 2006 with work details")}
                   >
-                    📈 Top selling products by quantity
+                    🎙️ Doctors assigned to rep 2006 & work details
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("show total revenue per user")}
+                    onClick={() => handleSendMessage("Show the full interaction history for doctor Jeffrey Allison")}
                   >
-                    💰 Total revenue per user
+                    📜 History audit for Dr. Jeffrey Allison
+                  </button>
+                  <button
+                    className="suggested-btn"
+                    onClick={() => handleSendMessage("List all representatives working under manager John Smith")}
+                  >
+                    👔 Reps managed by John Smith
                   </button>
                 </div>
               </div>
@@ -308,7 +314,7 @@ export default function App() {
           <div className="input-container">
             <input
               type="text"
-              placeholder="Ask about Users, Products, Orders... (e.g., 'show all shipped orders')"
+              placeholder="Ask about Leakage %, HCP Fatigue, Voice Work Details... (e.g., 'Show work details for rep 2006')"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyPress}

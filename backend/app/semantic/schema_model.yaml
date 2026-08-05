@@ -2,10 +2,10 @@ version: 2
 semantic_model:
   name: pharma_commercial_command_centre
   description: >
-    Semantic layer for the Pharma Commercial Command Centre (UC1: Leakage Signals, UC2: Journey Orchestration).
-    The UI dashboard displays data from 4 primary tables: Leakage_Activity, fatigue_score, leakage_history, and Compliance_Table.
+    Semantic layer for the Pharma Commercial Command Centre (UC1: Leakage Signals, UC2: Journey Orchestration, UC3: Voice-to-Text HCP Interaction Recording).
+    The UI dashboard displays data from primary tables: Leakage_Activity, fatigue_score, leakage_history, Compliance_Table, hcp_master_details, and hcp_master_workdetails_history.
     These are enriched during the data pipeline from reference tables: Product_Master, hcp_master, Zip_Geography_Master,
-    Payer_Master, hcp_engagement_logs, campaign_master, and copay_Claims_Transactions.
+    Payer_Master, hcp_engagement_logs, campaign_master, copay_Claims_Transactions, and rep_details.
 
   # ============================================================
   # PRIMARY UI TABLES — Data displayed directly on the dashboard
@@ -430,6 +430,103 @@ semantic_model:
             - name: status
               type: string
 
+        # =====================================================
+        # PRIMARY TABLE 5: HCP Master Details (UC3 Voice Work Detail)
+        # =====================================================
+        - name: hcp_master_details
+          description: >
+            PRIMARY UI TABLE (UC3) — Current work details, status, and transcribed interaction notes per HCP.
+            Contains Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, and sf_id.
+            Use for ALL UC3 queries: voice transcripts, work details, interaction notes, representative updates, and recording status.
+            Status values: Completed, In-Progress.
+          columns:
+            - name: hcp_detail_id
+              type: primary_key
+            - name: hcp_id
+              type: string
+              references: hcp_master.id
+              description: "Internal HCP identifier"
+            - name: Prescriber_NPI
+              type: string
+              references: hcp_master.Prescriber_NPI
+              description: "National Provider Identifier (10-digit NPI)"
+            - name: hcp_firstName
+              type: string
+              description: "First name of the Healthcare Professional"
+            - name: hcp_lastName
+              type: string
+              description: "Last name of the Healthcare Professional"
+            - name: rep_id
+              type: string
+              references: rep_details.rep_id
+              description: "Sales Representative ID assigned to this HCP"
+            - name: status
+              type: string
+              description: "Interaction recording status. Values: Completed, In-Progress"
+            - name: work_detail
+              type: string
+              description: "Transcribed clinical interaction notes / voice-to-text detail content"
+            - name: sf_id
+              type: string
+              description: "Salesforce 18-character Doctor__c record ID"
+            - name: created_at
+              type: timestamp
+            - name: updated_at
+              type: timestamp
+
+        # =====================================================
+        # PRIMARY TABLE 6: HCP Master Workdetails History (UC3 Audit Trail)
+        # =====================================================
+        - name: hcp_master_workdetails_history
+          description: >
+            AUDIT TRAIL TABLE (UC3) — Immutable history of all voice transcript changes and work detail updates.
+            Contains history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, and updated_datetime.
+            Use for tracking past modifications, audit logs, rep update history, and timestamped transcript changes.
+          columns:
+            - name: history_id
+              type: primary_key
+            - name: hcp_id
+              type: string
+              references: hcp_master_details.hcp_id
+              description: "Internal HCP identifier linking to current work details"
+            - name: rep_id
+              type: string
+              references: rep_details.rep_id
+              description: "ID of the Sales Representative who performed the update"
+            - name: rep_firstName
+              type: string
+              description: "First name of the Sales Representative"
+            - name: rep_lastName
+              type: string
+              description: "Last name of the Sales Representative"
+            - name: work_detail
+              type: string
+              description: "Historical work detail transcript content at the time of change"
+            - name: updated_datetime
+              type: timestamp
+              description: "Date and time when the work detail update was recorded"
+
+        # =====================================================
+        # REFERENCE TABLE: Representative Details (UC3 Rep Directory)
+        # =====================================================
+        - name: rep_details
+          description: >
+            Reference table: Sales Representative directory mapping rep_id to representative name, contact details, and manager alignment.
+          columns:
+            - name: rep_id
+              type: primary_key
+              description: "Sales Representative Identifier"
+            - name: rep_firstName
+              type: string
+            - name: rep_lastName
+              type: string
+            - name: email
+              type: string
+            - name: phone
+              type: string
+            - name: manager_id
+              type: string
+
   # ============================================================
   # VERIFIED JOIN PATHS (Only joins confirmed to return data)
   # ============================================================
@@ -475,6 +572,24 @@ semantic_model:
       right_table: Product_Master
       join_condition: "Leakage_Activity.productid = Product_Master.product_id"
       description: "Enriches leakage records with full product catalog details."
+
+    - name: hcp_details_to_history
+      left_table: hcp_master_details
+      right_table: hcp_master_workdetails_history
+      join_condition: "hcp_master_details.hcp_id = hcp_master_workdetails_history.hcp_id"
+      description: "UC3 Audit Join: Connects current HCP work detail status to historical transcript updates."
+
+    - name: hcp_details_to_hcp_master
+      left_table: hcp_master_details
+      right_table: hcp_master
+      join_condition: "hcp_master_details.Prescriber_NPI = hcp_master.Prescriber_NPI"
+      description: "UC3 Demographic Join: Enriches HCP work detail records with specialty, license, and full profile info from hcp_master."
+
+    - name: hcp_details_to_rep
+      left_table: hcp_master_details
+      right_table: rep_details
+      join_condition: "hcp_master_details.rep_id = rep_details.rep_id"
+      description: "UC3 Representative Join: Maps HCP work detail notes to the assigned sales representative profile."
 
   # ============================================================
   # BUSINESS TO DATABASE MAPPING RULES (STRICT)
@@ -540,11 +655,29 @@ semantic_model:
         4) Rejection_Root_Cause does NOT exist on any table (use reject_code/Reject_Message).
         5) 'leakage' column does NOT exist (use Leakage_Percentage).
 
-    - category: "Data Freshness"
+    - category: "Voice Work Detail & HCP Interaction Recording (UC3 Primary)"
       rule: >
-        Data was seeded around early July 2026. Do NOT use CURDATE(), 'today', 'this week',
-        or 'last 7 days' filters as they will return 0 results. Use the full dataset without
-        date filtering unless the user specifically requests a date range.
+        ALL queries regarding voice-to-text transcripts, HCP interaction recording, work details, rep transcripts,
+        recording status (Completed, In-Progress), or rep-assigned HCP notes MUST use `hcp_master_details`.
+        `work_detail` contains the text content transcribed from voice input.
+        `status` indicates whether the recording is 'Completed' or 'In-Progress'.
+        `sf_id` links the MySQL record to the 18-character Salesforce Doctor__c object ID.
+
+    - category: "HCP Work Detail Audit History (UC3 History)"
+      rule: >
+        ALL queries regarding transcript update history, audit trails of work details, previous rep edits, or change logs over time
+        MUST use `hcp_master_workdetails_history`. JOIN with `hcp_master_details` ON hcp_id to resolve current HCP status.
+        `updated_datetime` provides the timestamp of each change.
+
+    - category: "Today's & Specific Date Queries"
+      rule: >
+        When the user explicitly asks for 'today\'s' records or data for today (e.g., 'Show today\'s leakage alerts' or 'today\'s transactions'),
+        you MUST strictly filter using `CURDATE()` or `CURRENT_DATE()` on the relevant date column:
+        For `Leakage_Activity`: `WHERE DATE(Processed_TimeStamp) = CURDATE()`
+        For `copay_Claims_Transactions`: `WHERE DATE(transaction_datetime) = CURDATE()`
+        For `Compliance_Table`: `WHERE DATE(Created_At) = CURDATE()`
+        For `hcp_master_details`: `WHERE DATE(updated_at) = CURDATE()`
+        For `hcp_master_workdetails_history`: `WHERE DATE(updated_datetime) = CURDATE()`
 
   # ============================================================
   # PRE-DEFINED SQL MEASURES (Verified to return data)
@@ -554,6 +687,10 @@ semantic_model:
     - name: top_leakage_by_hcp
       description: "Top HCPs by leakage percentage"
       sql: "SELECT HCP_Name, BrandName, State, Pharmacy_Rejections, Leakage_Percentage FROM Leakage_Activity ORDER BY Leakage_Percentage DESC"
+
+    - name: todays_leakage_alerts
+      description: "Gets leakage alerts for today's date using CURDATE()"
+      sql: "SELECT HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage, Processed_TimeStamp FROM Leakage_Activity WHERE DATE(Processed_TimeStamp) = CURDATE() ORDER BY Leakage_Percentage DESC"
 
     - name: leakage_by_state
       description: "Leakage summary grouped by state"
@@ -604,3 +741,20 @@ semantic_model:
     - name: campaign_budget_by_channel
       description: "Campaign budget allocation by channel"
       sql: "SELECT channel, COUNT(*) as campaign_count, SUM(budget_amount) as total_budget, AVG(budget_amount) as avg_budget FROM campaign_master GROUP BY channel ORDER BY total_budget DESC"
+
+    # --- UC3: Voice Work Detail & Interaction Recording ---
+    - name: uc3_latest_hcp_work_details
+      description: "Latest work detail transcripts and recording status per HCP and assigned Rep"
+      sql: "SELECT Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, updated_at FROM hcp_master_details ORDER BY updated_at DESC"
+
+    - name: uc3_hcp_work_detail_history_audit
+      description: "Historical audit trail of voice transcript edits and work detail updates"
+      sql: "SELECT h.history_id, h.hcp_id, h.rep_id, h.rep_firstName, h.rep_lastName, h.work_detail, h.updated_datetime, d.hcp_firstName, d.hcp_lastName, d.status FROM hcp_master_workdetails_history h JOIN hcp_master_details d ON h.hcp_id = d.hcp_id ORDER BY h.updated_datetime DESC"
+
+    - name: uc3_rep_interaction_summary
+      description: "Summary of interaction recordings and completion status grouped by Sales Representative"
+      sql: "SELECT rep_id, COUNT(*) as total_hcps_assigned, SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed_interactions, SUM(CASE WHEN status = 'In-Progress' THEN 1 ELSE 0 END) as in_progress_interactions FROM hcp_master_details GROUP BY rep_id ORDER BY total_hcps_assigned DESC"
+
+    - name: uc3_work_detail_by_specialty
+      description: "HCP interaction recording completion rates grouped by physician specialty"
+      sql: "SELECT hm.specialty, COUNT(hmd.hcp_detail_id) as total_interactions, SUM(CASE WHEN hmd.status = 'Completed' THEN 1 ELSE 0 END) as completed_count FROM hcp_master_details hmd JOIN hcp_master hm ON hmd.Prescriber_NPI = hm.Prescriber_NPI GROUP BY hm.specialty ORDER BY total_interactions DESC"
