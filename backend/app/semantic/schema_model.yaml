@@ -665,6 +665,14 @@ semantic_model:
         `status` indicates whether the recording is 'Completed' or 'In-Progress'.
         `sf_id` links the MySQL record to the 18-character Salesforce Doctor__c object ID.
 
+    - category: "Medicine & Drug Prescriptions in Transcripts (UC3 Medicine Lookup)"
+      rule: >
+        When users ask about doctors/HCPs prescribing specific medicines or drugs (e.g. 'who prescribed Dolo650',
+        'doctors giving Dolo 650', 'HCPs prescribing paracetamol', 'who is giving ABC tablets'), search the voice transcript
+        `work_detail` column in `hcp_master_details` (or `hcp_master_workdetails_history`).
+        Use SQL pattern: `SELECT Prescriber_NPI, hcp_firstName, hcp_lastName, status, work_detail, updated_at FROM hcp_master_details WHERE work_detail LIKE '%[medicine_name]%'`.
+        DO NOT query Leakage_Activity or copay_Claims_Transactions for transcribed medicine names.
+
     - category: "HCP Work Detail Audit History (UC3 History)"
       rule: >
         ALL queries regarding transcript update history, audit trails of work details, previous rep edits, or change logs over time
@@ -752,6 +760,10 @@ semantic_model:
     - name: uc3_latest_hcp_work_details
       description: "Latest work detail transcripts and recording status per HCP and assigned Rep"
       sql: "SELECT Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, updated_at FROM hcp_master_details ORDER BY updated_at DESC"
+
+    - name: uc3_hcp_prescribing_medicine_transcript
+      description: "Finds doctors prescribing specific medicines (e.g. Dolo650, Dolo 650, paracetamol) from voice work detail transcripts in hcp_master_details"
+      sql: "SELECT Prescriber_NPI, hcp_firstName, hcp_lastName, status, work_detail, updated_at FROM hcp_master_details WHERE work_detail LIKE '%Dolo%'"
 
     - name: uc3_hcp_work_detail_history_audit
       description: "Historical audit trail of voice transcript edits and work detail updates"
