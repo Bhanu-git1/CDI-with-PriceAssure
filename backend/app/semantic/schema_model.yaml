@@ -668,9 +668,12 @@ semantic_model:
     - category: "Medicine & Drug Prescriptions in Transcripts (UC3 Medicine Lookup)"
       rule: >
         When users ask about doctors/HCPs prescribing specific medicines or drugs (e.g. 'who prescribed Dolo650',
-        'doctors giving Dolo 650', 'HCPs prescribing paracetamol', 'who is giving ABC tablets'), search the voice transcript
+        'who prescribed Pan 50', 'HCPs prescribing paracetamol', 'who is giving ABC tablets'), search the voice transcript
         `work_detail` column in `hcp_master_details` (or `hcp_master_workdetails_history`).
-        Use SQL pattern: `SELECT Prescriber_NPI, hcp_firstName, hcp_lastName, status, work_detail, updated_at FROM hcp_master_details WHERE work_detail LIKE '%[medicine_name]%'`.
+        To handle dosage number variations (e.g. user asking for 'Pan 50' when database contains 'PAN 40'), ALWAYS include the
+        base brand keyword in the LIKE condition:
+        `SELECT Prescriber_NPI, hcp_firstName, hcp_lastName, status, work_detail, updated_at FROM hcp_master_details WHERE work_detail LIKE '%[full_input]%' OR work_detail LIKE '%[base_brand]%'`.
+        Example for 'Pan 50': `WHERE work_detail LIKE '%Pan 50%' OR work_detail LIKE '%PAN%' OR work_detail LIKE '%Pan%'`.
         DO NOT query Leakage_Activity or copay_Claims_Transactions for transcribed medicine names.
 
     - category: "HCP Work Detail Audit History (UC3 History)"
