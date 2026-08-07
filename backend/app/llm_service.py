@@ -104,12 +104,22 @@ class LLMService:
         """
         history_context = ""
         if history:
-            history_lines = []
-            for item in history[-5:]:
-                role = item.get("role", "user")
-                content = item.get("content", "")
-                history_lines.append(f"{role.capitalize()}: {content}")
-            history_context = "CONVERSATION HISTORY:\n" + "\n".join(history_lines) + "\n\n"
+            formatted_history = []
+            for h in history[-4:]:
+                if isinstance(h, dict):
+                    sender_val = h.get("sender") or h.get("role") or "user"
+                    text_val = h.get("text") or h.get("content") or ""
+                    sql_val = h.get("sql")
+                else:
+                    sender_val = getattr(h, "sender", None) or getattr(h, "role", "user")
+                    text_val = getattr(h, "text", None) or getattr(h, "content", "")
+                    sql_val = getattr(h, "sql", None)
+
+                sender_name = "User" if sender_val == "user" else "Assistant"
+                formatted_history.append(f"{sender_name}: {text_val}")
+                if sql_val:
+                    formatted_history.append(f"  (SQL executed: {sql_val})")
+            history_context = "CONVERSATION HISTORY:\n" + "\n".join(formatted_history) + "\n\n"
 
         context_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
