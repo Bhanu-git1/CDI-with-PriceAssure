@@ -23,18 +23,14 @@ code_executor = CodeExecutor(db_service)
 semantic_loader = SemanticModelLoader()
 
 SYSTEM_PROMPT = """
-You generate Python code to the fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
-The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals), UC2 (Journey Orchestration), and UC3 (Voice Work Detail Manager & HCP Interaction Recording).
+You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
+The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals) and UC2 (Journey Orchestration & HCP Fatigue).
 
 UI DASHBOARD displays data from PRIMARY TABLES:
   1. Leakage_Activity (60 rows) — Main leakage records table
   2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60)
   3. leakage_history (13 rows) — Threshold update log
   4. Compliance_Table (111 rows) — Govt plans bypassed KPI
-  5. hcp_master_details — Main UC3 table (Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, sf_id)
-  6. hcp_master_workdetails_history — UC3 audit trail history table (history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime)
-  7. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
-  8. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
 
 PRIMARY TABLE FOR CLAIMS & REJECTIONS ANALYSIS:
   1. Leakage_Activity (60 rows) — Use for ALL claims, rejection claims, pharmacy rejections, brand rejections, and leakage queries.
@@ -47,7 +43,7 @@ RULES:
 - NEVER invent table or column names. Use ONLY columns listed in the governance block.
 - For ALL claims, claim rejections, rejected claims, or rejection keywords, ALWAYS use `Leakage_Activity` (Pharmacy_Rejections, Total_Brand_Rejections). DO NOT use `copay_Claims_Transactions`.
 - Use standard MySQL SQL syntax.
-- Use ONLY the VERIFIED JOIN PATHS defined in the - Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
+- Use ONLY the VERIFIED JOIN PATHS defined in governance block. Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 """
@@ -55,6 +51,7 @@ RULES:
 
 class LLMService:
     def __init__(self):
+        self.semantic_loader = semantic_loader
         if settings.GROQ_API_KEY:
             self.provider = "groq"
             logger.info(f"Initializing Groq client with model {settings.GROQ_MODEL} for DCE...")
