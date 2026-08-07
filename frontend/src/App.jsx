@@ -243,7 +243,7 @@ export default function App() {
               </div>
               <h3>Rx Leakage Command Center 🏥</h3>
               <p>
-                Ask questions about Leakage Signals, Journey Orchestration & HCP Fatigue, and Voice Work Detail & Interaction Recording. The AI will translate your questions into governed SQL and display real-time analytics!
+                Ask questions about Leakage Signals (UC1) and Journey Orchestration & HCP Fatigue (UC2). The AI will translate your questions into governed SQL and display real-time analytics!
               </p>
 
               <div style={{ width: '100%', marginTop: '24px' }}>
@@ -265,21 +265,15 @@ export default function App() {
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("Show all doctors assigned to representative ID 2006 with work details")}
+                    onClick={() => handleSendMessage("Calculate leakage summary grouped by state")}
                   >
-                    🎙️ Doctors assigned to rep 2006 & work details
+                    📊 Leakage percentage summary by state
                   </button>
                   <button
                     className="suggested-btn"
-                    onClick={() => handleSendMessage("Show the full interaction history for doctor Jeffrey Allison")}
+                    onClick={() => handleSendMessage("Show email open rate per campaign")}
                   >
-                    📜 History audit for Dr. Jeffrey Allison
-                  </button>
-                  <button
-                    className="suggested-btn"
-                    onClick={() => handleSendMessage("List all representatives working under manager John Smith")}
-                  >
-                    👔 Reps managed by John Smith
+                    📧 Email open rate per campaign
                   </button>
                 </div>
               </div>

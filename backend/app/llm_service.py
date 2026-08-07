@@ -47,8 +47,7 @@ RULES:
 - NEVER invent table or column names. Use ONLY columns listed in the governance block.
 - For ALL claims, claim rejections, rejected claims, or rejection keywords, ALWAYS use `Leakage_Activity` (Pharmacy_Rejections, Total_Brand_Rejections). DO NOT use `copay_Claims_Transactions`.
 - Use standard MySQL SQL syntax.
-- Use ONLY the VERIFIED JOIN PATHS defined in the governance block.
-- Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master, hmd = hcp_master_details, hmwh = hcp_master_workdetails_history, rd = rep_details, rm = rep_master.
+- Use ONLY the VERIFIED JOIN PATHS defined in the - Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 """
@@ -108,21 +107,22 @@ class LLMService:
         """
         history_context = ""
         if history:
-            formatted_history = []
-            for h in history[-3:]:
-                sender_name = "User" if h.sender == "user" else "Assistant"
-                formatted_history.append(f"{sender_name}: {h.text}")
-                if h.sql:
-                    formatted_history.append(f"  (SQL executed: {h.sql})")
-            history_context = "CONVERSATION HISTORY:\n" + "\n".join(formatted_history) + "\n\n"
-            
+            history_lines = []
+            for item in history[-5:]:
+                role = item.get("role", "user")
+                content = item.get("content", "")
+                history_lines.append(f"{role.capitalize()}: {content}")
+            history_context = "CONVERSATION HISTORY:\n" + "\n".join(history_lines) + "\n\n"
+
         context_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
             f"{self._get_refinement_instructions()}\n\n"
+            f"{self.semantic_loader.get_semantic_context_prompt()}\n\n"
             f"{history_context}"
             f"User Question: {user_message}"
         )
 
+        logger.info(f"Processing chat request using provider: {self.provider}")
         if self.provider == "groq":
             return await self._process_groq(user_message, context_prompt)
         elif self.provider == "gemini":
@@ -143,25 +143,16 @@ class LLMService:
             "  6. `hcp_engagement_logs` (42 rows): Log_ID, HCP_ID (FK: Prescriber_NPI), Engagement_Date, Channel ('Email','Webinar'), Email_Sent, Email_Opened, Email_Clicked, Webinar_Minutes, Campaign_ID.\n"
             "  7. `campaign_master` (100 rows): campaign_id, campaign_name, campaign_type, campaign_category, channel ('Email','Webinar',etc.), product_id, brand_name, target_audience, target_specialty, target_segment, budget_amount, expected_reach, status.\n"
             "  8. `hcp_master` (103 rows): id, Prescriber_NPI, hcp_firstName, hcp_lastName, specialty, practice_state, practice_zip, phone, secure_fax. (Full HCP Name = CONCAT(hcp_firstName, ' ', hcp_lastName))\n"
-            "  9. `hcp_master_details` (UC3 Primary): hcp_detail_id, hcp_id, Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status ('Completed','In-Progress'), work_detail, sf_id, created_at, updated_at. (`work_detail` stores transcribed voice notes containing prescribed medicine names like Dolo650, paracetamol, ABC tablets).\n"
-            "  10. `hcp_master_workdetails_history` (UC3 Audit): history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime.\n"
-            "  11. `rep_details` (UC3 Reps): rep_id, rep_firstName, rep_lastName, email, phone, manager_id.\n"
-            "  12. `rep_master` (UC3 Managers): rep_id, rep_firstName, rep_lastName, email, phone.\n"
-            "  13. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
-            "  14. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
+            "  9. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
+            "  10. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
             "CRITICAL RULES:\n"
-            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims, hcp_master_details, hcp_master_workdetails_history, rep_details, rep_master.\n"
+            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims.\n"
             "  - DO NOT USE copay_Claims_Transactions or Reverse_Claims for any claim or rejection queries. ALWAYS use Leakage_Activity (Pharmacy_Rejections, Total_Brand_Rejections) for all claims and rejection prompts.\n"
-            "  - FOR MEDICINE / DRUG PRESCRIPTION QUERIES (e.g. 'who prescribed Dolo650', 'who prescribed Pan 50', 'who prescribed paracetamol'): ALWAYS query `hcp_master_details` (or `hcp_master_workdetails_history`) using `WHERE work_detail LIKE '%[full_input]%' OR work_detail LIKE '%[base_brand]%'` (e.g. for 'Pan 50', search `WHERE work_detail LIKE '%Pan 50%' OR work_detail LIKE '%PAN%' OR work_detail LIKE '%Pan%'` so dosage variations match). DO NOT query Leakage_Activity for prescribed medicine names!\n"
             "  - NEVER invent column names.\n"
             "  - For cross-table keyword search (e.g. 'Search for Endocrinology in the database', 'Look up Nancy everywhere', 'Find any record containing TX across all tables'), call Python code: `data = json.loads(db.search_records('search_term'))` and store `result = {'sql': 'CROSS_TABLE_SEARCH: search_term', 'records': data.get('records', [])}`.\n"
             "  - When user asks for 'today\'s' records or data for today, ALWAYS filter strictly using `CURDATE()` on the relevant date column: `WHERE DATE(Processed_TimeStamp) = CURDATE()`.\n\n"
             "VERIFIED JOIN PATHS:\n"
             "  - copay_Claims_Transactions.Prescriber_NPI = hcp_master.Prescriber_NPI\n"
-            "  - hcp_master_details.Prescriber_NPI = hcp_master.Prescriber_NPI\n"
-            "  - hcp_master_details.hcp_id = hcp_master_workdetails_history.hcp_id\n"
-            "  - hcp_master_details.rep_id = rep_details.rep_id\n"
-            "  - rep_details.manager_id = rep_master.rep_id\n"
             "  - copay_Claims_Transactions.payer_id = Payer_Master.payer_id\n"
             "  - copay_Claims_Transactions.reject_code = Reject_Code_Master.reject_code\n"
             "  - hcp_engagement_logs.Campaign_ID = campaign_master.campaign_id\n"
