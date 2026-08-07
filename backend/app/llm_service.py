@@ -23,7 +23,7 @@ code_executor = CodeExecutor(db_service)
 semantic_loader = SemanticModelLoader()
 
 SYSTEM_PROMPT = """
-You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
+You generate Python code to the fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
 The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals), UC2 (Journey Orchestration), and UC3 (Voice Work Detail Manager & HCP Interaction Recording).
 
 UI DASHBOARD displays data from PRIMARY TABLES:
