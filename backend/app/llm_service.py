@@ -79,6 +79,7 @@ RULES:
 SALESFORCE_SYSTEM_PROMPT = """
 You generate Python code to fetch and analyze data from a Salesforce org for Healthcare Professionals (HCPs / Doctors), Sales Representatives, and Sales Managers.
 
+
 ########## OBJECT & FIELD MAPPING (SEMANTIC LAYER) ##########
 
 1. Doctor__c (Healthcare Professionals / HCPs / Doctors):
