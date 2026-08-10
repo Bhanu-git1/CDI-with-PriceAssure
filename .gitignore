@@ -23,3 +23,8 @@ Thumbs.db
 *.log
 backend/app/logs/
 logs/
+
+# Vite temporary files
+*.timestamp-*.mjs
+*.timestamp-*.js
+

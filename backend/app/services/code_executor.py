@@ -74,8 +74,9 @@ class CodeExecutor:
     """
     Executes LLM-generated Python code in a safe, restricted namespace.
     """
-    def __init__(self, db_service):
+    def __init__(self, db_service, global_name: str = "db"):
         self.db = db_service
+        self.global_name = global_name
 
     def sanitize_code(self, code: str) -> str:
         """Cleans LLM output, strips markdown fences, fixes escaped newlines and concatenated statements."""
@@ -140,7 +141,14 @@ class CodeExecutor:
         The code is expected to store its final result in the `result` variable.
         """
         # Validate safety & sanitize code first
-        code = self.validate_code(code)
+        try:
+            code = self.validate_code(code)
+        except (SecurityError, SyntaxError) as e:
+            return {
+                "result": None,
+                "logs": "",
+                "error": f"Validation error: {str(e)}"
+            }
 
         # Capturing stdout for print calls in the code
         class StringIO:
@@ -190,7 +198,7 @@ class CodeExecutor:
                 "KeyError": KeyError,
                 "IndexError": IndexError,
             },
-            "db": self.db,
+            self.global_name: self.db,
             "json": json,
             "math": math,
             "datetime": datetime,

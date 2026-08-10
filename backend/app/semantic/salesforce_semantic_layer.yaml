@@ -1,0 +1,150 @@
+version: "1.0"
+dataset: "Healthcare Professional (HCP) & Sales Representative Tracking System"
+description: "Semantic layer mapping business concepts to Salesforce Custom Objects for HCP Doctors, Sales Representatives, and Sales Managers."
+
+objects:
+  Doctor__c:
+    label: "Doctor / Healthcare Professional (HCP)"
+    description: "Contains Healthcare Professional (HCP) details including speciality, license, contact details, status, and practice location."
+    primary_key: "Id"
+    custom_id_field: "SF_Id__c"
+    fields:
+      HCP_First_Name__c:
+        label: "HCP First Name"
+        type: "string"
+        description: "First name of the Healthcare Professional (Doctor)."
+      HCP_Last_Name__c:
+        label: "HCP Last Name"
+        type: "string"
+        description: "Last name of the Healthcare Professional (Doctor)."
+      Speciality__c:
+        label: "Speciality"
+        type: "string"
+        description: "Medical speciality (e.g., Cardiology, Oncology, Pediatrics, Neurology, Gastroenterology, Nephrology, Endocrinology, Rheumatology)."
+      State_License__c:
+        label: "State License Number"
+        type: "string"
+        description: "State medical license identification number."
+      Practice_State__c:
+        label: "Practice State"
+        type: "string"
+        description: "State code or name where the HCP practices (e.g., TX, CA, NY, FL)."
+      Phone__c:
+        label: "Phone Number"
+        type: "phone"
+        description: "Contact phone number for the HCP."
+      Secure_Fax__c:
+        label: "Secure Fax"
+        type: "double"
+        description: "Secure fax number for the HCP office."
+      Status__c:
+        label: "Status"
+        type: "picklist"
+        picklist_values: ["In-Progress", "Completed"]
+        description: "Exact picklist values for Status__c are 'In-Progress' and 'Completed'. When filtering by in-progress, query `Status__c = 'In-Progress'`."
+      Work_Details__c:
+        label: "Work Details"
+        type: "textarea"
+        description: "Details regarding the HCP's practice, clinic, hospital affiliation, or work schedule."
+      Rep_ID__c:
+        label: "Assigned Rep ID"
+        type: "string"
+        description: "Identifier of the assigned Sales Representative."
+      Rep_Ids__c:
+        label: "Sales Representative Relationship"
+        type: "reference"
+        reference_to: "Rep_Details__c"
+        relationship_name: "Rep_Ids__r"
+        description: "Lookup or Master-Detail reference linking Doctor to Rep_Details__c."
+
+  Rep_Details__c:
+    label: "Sales Representative Details"
+    aliases:
+      - "Rep_Detials__c"
+      - "HCP_Rep_Detail__c"
+    description: "Contains Sales Representative details assigned to manage HCP/Doctor relationships."
+    primary_key: "Id"
+    custom_id_field: "Rep_Id__c"
+    fields:
+      Rep_Id__c:
+        label: "Rep ID"
+        type: "string"
+        description: "Unique identifier for the Sales Representative."
+      First_Name__c:
+        label: "First Name"
+        type: "string"
+        description: "First name of the Sales Representative."
+      Last_Name__c:
+        label: "Last Name"
+        type: "string"
+        description: "Last name of the Sales Representative."
+      Email__c:
+        label: "Email"
+        type: "email"
+        description: "Email address of the Sales Representative."
+      Phone_Number__c:
+        label: "Phone Number"
+        type: "phone"
+        description: "Contact phone number of the Sales Representative."
+      Rep_Manager__c:
+        label: "Sales Manager Relationship"
+        type: "reference"
+        reference_to: "Rep_Manager__c"
+        relationship_name: "Rep_Manager__r"
+        description: "Lookup or Master-Detail reference linking Sales Rep to Rep_Manager__c."
+
+  Rep_Manager__c:
+    label: "Sales Representative Manager"
+    description: "Contains Sales Manager details supervising Sales Representatives."
+    primary_key: "Id"
+    custom_id_field: "Rep_Manager_Id__c"
+    fields:
+      Rep_Manager_Id__c:
+        label: "Manager ID"
+        type: "string"
+        description: "Unique identifier for the Sales Manager."
+      First_Name__c:
+        label: "First Name"
+        type: "string"
+        description: "First name of the Sales Manager."
+      Last_Name__c:
+        label: "Last Name"
+        type: "string"
+        description: "Last name of the Sales Manager."
+      Email__c:
+        label: "Email"
+        type: "email"
+        description: "Email address of the Sales Manager."
+      Phone_Number__c:
+        label: "Phone Number"
+        type: "phone"
+        description: "Phone number of the Sales Manager."
+
+relationships:
+  - name: "Doctor_to_Rep"
+    from_object: "Doctor__c"
+    to_object: "Rep_Details__c"
+    type: "Lookup"
+    foreign_key: "Rep_Ids__c"
+    relationship_name: "Rep_Ids__r"
+    description: "Doctor record references Sales Representative details."
+
+  - name: "Rep_to_Manager"
+    from_object: "Rep_Details__c"
+    to_object: "Rep_Manager__c"
+    type: "Lookup"
+    foreign_key: "Rep_Manager__c"
+    relationship_name: "Rep_Manager__r"
+    description: "Sales Representative record references Sales Manager details."
+
+sample_queries:
+  - question: "List all In-Progress doctors with their speciality and state"
+    soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c WHERE Status__c = 'In-Progress'"
+  - question: "List all Completed doctors with their speciality and state"
+    soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c WHERE Status__c = 'Completed'"
+  - question: "Show sales representatives along with their assigned manager"
+    soql: "SELECT First_Name__c, Last_Name__c, Email__c, Rep_Manager__r.First_Name__c, Rep_Manager__r.Last_Name__c FROM Rep_Details__c"
+  - question: "Find doctors and their assigned sales representative details"
+    soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c FROM Doctor__c"
+  - question: "List all Sales Managers and their contact emails"
+    soql: "SELECT First_Name__c, Last_Name__c, Email__c, Phone_Number__c FROM Rep_Manager__c"

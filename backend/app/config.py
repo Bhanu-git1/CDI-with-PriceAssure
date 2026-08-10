@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = "qwen2.5-coder:7b"
     OLLAMA_HOST: str = "http://localhost:11434"
 
+    # Salesforce Connection Settings (UC3)
+    SF_USERNAME: str = ""
+    SF_PASSWORD: str = ""
+    SF_SECURITY_TOKEN: str = ""
+    SF_DOMAIN: str = "login"
+    SF_SESSION_ID: Optional[str] = None
+    SF_INSTANCE_URL: Optional[str] = None
+
     # API Settings
     PORT: int = 8000
     HOST: str = "0.0.0.0"
@@ -29,6 +37,7 @@ class Settings(BaseSettings):
     @field_validator(
         "MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE",
         "GROQ_API_KEY", "GROQ_MODEL", "GEMINI_API_KEY", "OLLAMA_MODEL", "OLLAMA_HOST", "HOST",
+        "SF_USERNAME", "SF_PASSWORD", "SF_SECURITY_TOKEN", "SF_DOMAIN", "SF_SESSION_ID", "SF_INSTANCE_URL",
         mode="before"
     )
     @classmethod

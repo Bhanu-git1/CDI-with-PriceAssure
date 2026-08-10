@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.llm_service import llm_service, db_service
+from app.llm_service import llm_service, db_service, sf_service
 
 # Configure standard console logging
 logging.basicConfig(level=logging.INFO)
@@ -13,7 +13,7 @@ logger = logging.getLogger("dce-fastapi-app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Verify credentials & connection to MySQL
+    # Startup: Verify credentials & connection to MySQL (UC1/UC2)
     logger.info("Initializing MySQL DCE workspace...")
     try:
         conn = db_service.get_connection()
@@ -21,9 +21,18 @@ async def lifespan(app: FastAPI):
         logger.info("MySQL connection verified successfully (DCE).")
     except Exception as e:
         logger.error(f"Failed to establish MySQL connection on startup: {e}")
-    
+
+    # Startup: Verify credentials & connection to Salesforce (UC3). Non-fatal —
+    # UC1/UC2 must keep working even if Salesforce is unreachable/misconfigured.
+    logger.info("Initializing Salesforce DCE workspace (UC3)...")
+    try:
+        sf_service.get_connection()
+        logger.info("Salesforce connection verified successfully (DCE).")
+    except Exception as e:
+        logger.error(f"Failed to establish Salesforce connection on startup: {e}")
+
     yield
-    
+
     logger.info("Shutting down MySQL DCE workspace...")
 
 # Create FastAPI instance with Lifespan lifecycle hooks
@@ -72,8 +81,8 @@ def read_root():
     return {
         "status": "online",
         "provider": provider,
-        "dce_service": "mysql-service (active)",
-        "platform": "MySQL Database"
+        "dce_service": "mysql-service + salesforce-service (active)",
+        "platform": "MySQL Database (UC1/UC2) + Salesforce CRM (UC3)"
     }
 
 @app.post("/api/chat")
