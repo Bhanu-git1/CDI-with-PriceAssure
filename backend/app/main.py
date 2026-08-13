@@ -73,10 +73,10 @@ class ChatRequest(BaseModel):
 def read_root():
     if settings.GROQ_API_KEY:
         provider = f"Groq ({settings.GROQ_MODEL})"
-    elif settings.GEMINI_API_KEY:
-        provider = "Gemini API"
+    elif settings.CLAUDE_API_KEY:
+        provider = f"Claude ({settings.CLAUDE_MODEL})"
     else:
-        provider = f"Ollama ({settings.OLLAMA_MODEL})"
+        provider = "Not configured"
 
     return {
         "status": "online",

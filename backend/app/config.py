@@ -18,9 +18,8 @@ class Settings(BaseSettings):
     # LLM Settings
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
-    GEMINI_API_KEY: Optional[str] = None
-    OLLAMA_MODEL: str = "qwen2.5-coder:7b"
-    OLLAMA_HOST: str = "http://localhost:11434"
+    CLAUDE_API_KEY: Optional[str] = None
+    CLAUDE_MODEL: str = "claude-opus-5"
 
     # Salesforce Connection Settings (UC3)
     SF_USERNAME: str = ""
@@ -36,7 +35,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE",
-        "GROQ_API_KEY", "GROQ_MODEL", "GEMINI_API_KEY", "OLLAMA_MODEL", "OLLAMA_HOST", "HOST",
+        "GROQ_API_KEY", "GROQ_MODEL", "CLAUDE_API_KEY", "CLAUDE_MODEL", "HOST",
         "SF_USERNAME", "SF_PASSWORD", "SF_SECURITY_TOKEN", "SF_DOMAIN", "SF_SESSION_ID", "SF_INSTANCE_URL",
         mode="before"
     )

@@ -19,8 +19,9 @@ backend/.env
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and Archives
 *.log
+*.zip
 backend/app/logs/
 logs/
 

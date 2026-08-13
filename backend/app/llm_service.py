@@ -3,7 +3,7 @@ import logging
 import os
 import httpx
 from typing import Dict, Any, Tuple, Optional
-import ollama
+import anthropic
 
 from app.config import settings
 from app.services.mysql_service import MySQLService
@@ -80,7 +80,7 @@ SALESFORCE_SYSTEM_PROMPT = """
 You generate Python code to fetch and analyze data from a Salesforce org for Healthcare Professionals (HCPs / Doctors), Sales Representatives, and Sales Managers.
 
 
-########## OBJECT & FIELD MAPPING (SEMANTIC LAYER) ##########
+########## OBJECT & FIELD MAPPING (SEMANTIC LAYER) ###########
 
 1. Doctor__c (Healthcare Professionals / HCPs / Doctors):
    - Primary custom object representing Doctors and Healthcare Professionals.
@@ -136,36 +136,14 @@ class LLMService:
         if settings.GROQ_API_KEY:
             self.provider = "groq"
             logger.info(f"Initializing Groq client with model {settings.GROQ_MODEL} for DCE...")
-        elif settings.GEMINI_API_KEY:
-            self.provider = "gemini"
-            logger.info("Initializing Google Gemini client for DCE...")
-            import google.generativeai as genai
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            
-            model_name = 'gemini-1.5-flash'  # fallback default
-            try:
-                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                logger.info(f"Found available Gemini models: {available_models}")
-                
-                for candidate in ['models/gemini-2.0-flash', 'models/gemini-2.5-flash', 'models/gemini-1.5-flash']:
-                    if candidate in available_models:
-                        model_name = candidate
-                        break
-                else:
-                    flash_candidates = [m for m in available_models if 'flash' in m.lower()]
-                    if flash_candidates:
-                        model_name = flash_candidates[0]
-                    elif available_models:
-                        model_name = available_models[0]
-                
-                logger.info(f"Selected model: {model_name}")
-            except Exception as e:
-                logger.warning(f"Could not list available models, defaulting to {model_name}. Error: {e}")
-                
-            self.gemini_model = genai.GenerativeModel(model_name)
+        elif settings.CLAUDE_API_KEY:
+            self.provider = "claude"
+            logger.info(f"Initializing Claude client with model {settings.CLAUDE_MODEL} for DCE...")
+            self.claude_client = anthropic.AsyncAnthropic(api_key=settings.CLAUDE_API_KEY)
         else:
-            self.provider = "ollama"
-            logger.info(f"Using local Ollama client running at {settings.OLLAMA_HOST} with model {settings.OLLAMA_MODEL} for DCE")
+            raise RuntimeError(
+                "No LLM provider configured. Set GROQ_API_KEY or CLAUDE_API_KEY in backend/.env."
+            )
 
     async def get_schema_context(self) -> str:
         """Fetch MySQL schema overview directly."""
@@ -275,10 +253,8 @@ class LLMService:
         logger.info(f"Processing Salesforce (UC3) chat request using provider: {self.provider}")
         if self.provider == "groq":
             return await self._process_salesforce_groq(user_message, context_prompt)
-        elif self.provider == "gemini":
-            return await self._process_salesforce_gemini(user_message, context_prompt)
         else:
-            return await self._process_salesforce_ollama(user_message, context_prompt)
+            return await self._process_salesforce_claude(user_message, context_prompt)
 
     async def _process_salesforce_groq(self, user_message: str, prompt: str) -> Dict[str, Any]:
         """Process Salesforce (UC3) requests using Groq API and dynamic code execution."""
@@ -388,23 +364,15 @@ class LLMService:
                 "error": str(e)
             }
 
-    async def _process_salesforce_gemini(self, user_message: str, prompt: str) -> Dict[str, Any]:
-        """Process Salesforce (UC3) requests using Gemini API and dynamic code execution."""
+    async def _process_salesforce_claude(self, user_message: str, prompt: str) -> Dict[str, Any]:
+        """Process Salesforce (UC3) requests using Claude (Anthropic) API and dynamic code execution."""
         try:
-            logger.info("Calling Gemini API for Salesforce code generation...")
-            response = self.gemini_model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
+            logger.info("Calling Claude API for Salesforce code generation...")
+            response_text = await self._call_claude_api(
+                messages=[{"role": "user", "content": prompt}],
             )
-            response_text = response.text.strip()
 
-            if response_text.startswith("```json"):
-                response_text = response_text.replace("```json", "", 1)
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-
-            logger.info(f"Gemini raw output (Salesforce): {response_text}")
+            logger.info(f"Claude raw output (Salesforce): {response_text}")
             parsed = self._extract_json(response_text)
 
             code = parsed.get("code")
@@ -413,9 +381,11 @@ class LLMService:
             if code and code.strip():
                 execution = code_executor_sf.execute(code)
 
-                # Self-correction retry: mirrors the original standalone UC3 pipeline.
+                # Self-correction retry: LLM-generated code sometimes has quoting/syntax
+                # issues (e.g. unescaped quotes inside SOQL string literals). Retry once
+                # with the error fed back, same as the Groq pipeline.
                 if execution["error"]:
-                    logger.warning(f"Salesforce Gemini code execution error on attempt 1: {execution['error']}. Retrying...")
+                    logger.warning(f"Salesforce code execution error on attempt 1: {execution['error']}. Retrying with error feedback...")
                     retry_prompt = (
                         f"{prompt}\n\n"
                         f"Your previous Python code failed with error:\n{execution['error']}\n"
@@ -423,22 +393,21 @@ class LLMService:
                         f"Please correct the Python code or SOQL query to fix this error and return valid JSON."
                     )
                     try:
-                        retry_response = self.gemini_model.generate_content(
-                            retry_prompt,
-                            generation_config={"response_mime_type": "application/json"}
+                        retry_response_text = await self._call_claude_api(
+                            messages=[{"role": "user", "content": retry_prompt}],
                         )
-                        parsed_retry = self._extract_json(retry_response.text)
+                        parsed_retry = self._extract_json(retry_response_text)
                         if parsed_retry.get("code"):
                             code = parsed_retry.get("code")
                             execution = code_executor_sf.execute(code)
                     except Exception as e:
-                        logger.warning(f"Salesforce Gemini retry call failed: {e}")
+                        logger.warning(f"Salesforce retry call failed: {e}")
 
                 if execution["error"]:
                     return {
                         "answer": f"I attempted to query Salesforce for your request, but encountered an execution issue.\n\n"
                                   f"**Detail:** `{execution['error']}`\n\n"
-                                  f"Please try rephrasing your request or asking for specific fields (e.g. 'Show all doctors in CA').",
+                                  f"Please try rephrasing your request or asking for specific fields (e.g. 'Show all doctors in CA' or 'List sales reps').",
                         "sql": code,
                         "data": None,
                         "error": execution["error"]
@@ -450,102 +419,19 @@ class LLMService:
                 final_prompt = (
                     f"You are a helpful Salesforce data assistant.\n"
                     f"User asked: {user_message}\n"
-                    f"You ran this Python code:\n{code}\n"
+                    f"You executed this Python/SOQL code:\n{code}\n"
                     f"Execution result: {json.dumps(result_data, default=str)}\n\n"
                     f"Provide a clear, direct, and professional natural language response summarizing the findings. "
-                    f"If 0 records were returned, state politely that no records matched the criteria in Salesforce."
+                    f"If 0 records were returned, state politely that no records matched the criteria in the Salesforce org and suggest alternative terms."
                 )
-                final_response = self.gemini_model.generate_content(final_prompt)
 
-                sql_to_return = code
-                data_to_return = None
-
-                if isinstance(result_data, dict):
-                    sql_to_return = result_data.get("soql") or result_data.get("sosl") or result_data.get("query") or code
-                    data_to_return = result_data.get("records") or result_data.get("data")
-                    if data_to_return is None:
-                        data_to_return = result_data
-                else:
-                    data_to_return = result_data
-
-                return {
-                    "answer": final_response.text,
-                    "sql": sql_to_return,
-                    "data": data_to_return,
-                    "error": None
-                }
-            else:
-                return {
-                    "answer": answer or "I couldn't process that query.",
-                    "sql": None,
-                    "data": None,
-                    "error": None
-                }
-
-        except Exception as e:
-            logger.exception("Error in Salesforce Gemini processing")
-            return {
-                "answer": "An error occurred while generating the Salesforce response.",
-                "sql": None,
-                "data": None,
-                "error": str(e)
-            }
-
-    async def _process_salesforce_ollama(self, user_message: str, prompt: str) -> Dict[str, Any]:
-        """Process Salesforce (UC3) requests using local Ollama and dynamic code execution."""
-        try:
-            async with httpx.AsyncClient() as client:
                 try:
-                    await client.get(settings.OLLAMA_HOST, timeout=2.0)
-                except Exception:
-                    raise RuntimeError(f"Ollama server is not running or unreachable at {settings.OLLAMA_HOST}. Make sure you ran 'ollama serve'.")
-
-            logger.info("Calling local Ollama model for Salesforce code generation...")
-            response = ollama.chat(
-                model=settings.OLLAMA_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                format="json",
-                options={"temperature": 0.1}
-            )
-
-            response_text = response['message']['content'].strip()
-            if response_text.startswith("```json"):
-                response_text = response_text.replace("```json", "", 1)
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-
-            logger.info(f"Ollama raw output (Salesforce): {response_text}")
-            parsed = self._extract_json(response_text)
-
-            code = parsed.get("code")
-            answer = parsed.get("answer")
-
-            if code and code.strip():
-                execution = code_executor_sf.execute(code)
-                if execution["error"]:
-                    return {
-                        "answer": f"Code execution failed.",
-                        "sql": code,
-                        "data": None,
-                        "error": execution["error"]
-                    }
-
-                result_data = execution["result"]
-                logger.info(f"Sandbox execution results (Salesforce): {result_data}")
-
-                final_prompt = (
-                    f"You are a helpful Salesforce data assistant.\n"
-                    f"User asked: {user_message}\n"
-                    f"You ran this Python code:\n{code}\n"
-                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
-                    f"Provide a clear, direct, and professional natural language response summarizing the findings."
-                )
-
-                final_resp = ollama.chat(
-                    model=settings.OLLAMA_MODEL,
-                    messages=[{"role": "user", "content": final_prompt}]
-                )
+                    final_answer = await self._call_claude_api(
+                        messages=[{"role": "user", "content": final_prompt}],
+                    )
+                except Exception as e:
+                    logger.warning(f"Salesforce summarization call failed, defaulting: {e}")
+                    final_answer = "Query executed successfully."
 
                 sql_to_return = code
                 data_to_return = None
@@ -559,7 +445,7 @@ class LLMService:
                     data_to_return = result_data
 
                 return {
-                    "answer": final_resp['message']['content'],
+                    "answer": final_answer,
                     "sql": sql_to_return,
                     "data": data_to_return,
                     "error": None
@@ -573,9 +459,9 @@ class LLMService:
                 }
 
         except Exception as e:
-            logger.exception("Error in Salesforce Ollama processing")
+            logger.exception("Error in Salesforce Claude processing")
             return {
-                "answer": f"Ollama Error: {str(e)}",
+                "answer": f"I ran into an error processing your Salesforce request: {str(e)}. Please check your query or try rephrasing.",
                 "sql": None,
                 "data": None,
                 "error": str(e)
@@ -620,10 +506,8 @@ class LLMService:
         logger.info(f"Processing chat request using provider: {self.provider}")
         if self.provider == "groq":
             return await self._process_groq(user_message, context_prompt)
-        elif self.provider == "gemini":
-            return await self._process_gemini(user_message, context_prompt)
         else:
-            return await self._process_ollama(user_message, context_prompt)
+            return await self._process_claude(user_message, context_prompt)
 
     def _get_refinement_instructions(self) -> str:
         return (
@@ -727,6 +611,19 @@ class LLMService:
                         raise RuntimeError(f"Groq API Error {resp.status_code}: {resp.text}")
                     
         raise RuntimeError(last_error or "Groq API request failed across all models.")
+
+    async def _call_claude_api(self, messages: list) -> str:
+        """Call the Claude (Anthropic) Messages API and return the response text."""
+        logger.info(f"Calling Claude API ({settings.CLAUDE_MODEL})...")
+        response = await self.claude_client.messages.create(
+            model=settings.CLAUDE_MODEL,
+            max_tokens=4096,
+            messages=messages,
+        )
+        for block in response.content:
+            if block.type == "text":
+                return block.text.strip()
+        return ""
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         """Robust JSON payload extractor that handles markdown code blocks and multiline strings."""
@@ -839,24 +736,16 @@ class LLMService:
             }
 
 
-    async def _process_gemini(self, user_message: str, prompt: str) -> Dict[str, Any]:
-        """Process requests using Gemini API and dynamic code execution."""
+    async def _process_claude(self, user_message: str, prompt: str) -> Dict[str, Any]:
+        """Process requests using Claude (Anthropic) API and dynamic code execution."""
         try:
-            logger.info("Calling Gemini API for code generation...")
-            response = self.gemini_model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
+            logger.info("Calling Claude API for code generation...")
+            response_text = await self._call_claude_api(
+                messages=[{"role": "user", "content": prompt}],
             )
-            response_text = response.text.strip()
-            
-            if response_text.startswith("```json"):
-                response_text = response_text.replace("```json", "", 1)
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
 
-            logger.info(f"Gemini raw output: {response_text}")
-            parsed = json.loads(response_text)
+            logger.info(f"Claude raw output: {response_text}")
+            parsed = self._extract_json(response_text)
 
             code = parsed.get("code")
             answer = parsed.get("answer")
@@ -871,7 +760,7 @@ class LLMService:
                         "data": None,
                         "error": execution["error"]
                     }
-                
+
                 result_data = execution["result"]
                 logger.info(f"Sandbox execution results: {result_data}")
 
@@ -883,101 +772,15 @@ class LLMService:
                     f"Execution result: {json.dumps(result_data, default=str)}\n\n"
                     f"Provide a natural language summary of the results. Be clear and direct."
                 )
-                final_response = self.gemini_model.generate_content(final_prompt)
 
-                # Process result formatting for frontend
-                sql_to_return = code
-                data_to_return = None
-
-                if isinstance(result_data, dict):
-                    # Extract raw SQL query if stored in result, otherwise return the python script code
-                    sql_to_return = result_data.get("sql") or result_data.get("query") or code
-                    data_to_return = result_data.get("records") or result_data.get("data")
-                    if data_to_return is None:
-                        # Fallback to the whole result if records/data not explicitly defined
-                        data_to_return = result_data
-                else:
-                    data_to_return = result_data
-
-                return {
-                    "answer": final_response.text,
-                    "sql": sql_to_return,
-                    "data": data_to_return,
-                    "error": None
-                }
-            else:
-                return {
-                    "answer": answer or "I couldn't process that query.",
-                    "sql": None,
-                    "data": None,
-                    "error": None
-                }
-                
-        except Exception as e:
-            logger.exception("Error in Gemini processing")
-            return {
-                "answer": "An error occurred while generating the MySQL response.",
-                "sql": None,
-                "data": None,
-                "error": str(e)
-            }
-
-    async def _process_ollama(self, user_message: str, prompt: str) -> Dict[str, Any]:
-        """Process requests using Local Ollama and dynamic code execution."""
-        try:
-            async with httpx.AsyncClient() as client:
                 try:
-                    await client.get(settings.OLLAMA_HOST, timeout=2.0)
-                except Exception:
-                    raise RuntimeError(f"Ollama server is not running or unreachable at {settings.OLLAMA_HOST}. Make sure you ran 'ollama serve'.")
+                    final_answer = await self._call_claude_api(
+                        messages=[{"role": "user", "content": final_prompt}],
+                    )
+                except Exception as e:
+                    logger.warning(f"Summarization call failed, defaulting: {e}")
+                    final_answer = "Query executed successfully."
 
-            logger.info("Calling local Ollama model for code generation...")
-            response = ollama.chat(
-                model=settings.OLLAMA_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                format="json",
-                options={"temperature": 0.1}
-            )
-            
-            response_text = response['message']['content'].strip()
-            if response_text.startswith("```json"):
-                response_text = response_text.replace("```json", "", 1)
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            
-            logger.info(f"Ollama raw output: {response_text}")
-            parsed = json.loads(response_text)
-
-            code = parsed.get("code")
-            answer = parsed.get("answer")
-
-            if code and code.strip():
-                execution = code_executor.execute(code)
-                if execution["error"]:
-                    return {
-                        "answer": f"Code execution failed.",
-                        "sql": code,
-                        "data": None,
-                        "error": execution["error"]
-                    }
-                
-                result_data = execution["result"]
-                logger.info(f"Sandbox execution results: {result_data}")
-
-                final_prompt = (
-                    f"You are a MySQL data expert.\n"
-                    f"User asked: {user_message}\n"
-                    f"You ran this Python code:\n{code}\n"
-                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
-                    f"Provide a natural language summary of the results. Be clear and direct."
-                )
-                
-                final_resp = ollama.chat(
-                    model=settings.OLLAMA_MODEL,
-                    messages=[{"role": "user", "content": final_prompt}]
-                )
-                
                 sql_to_return = code
                 data_to_return = None
 
@@ -990,7 +793,7 @@ class LLMService:
                     data_to_return = result_data
 
                 return {
-                    "answer": final_resp['message']['content'],
+                    "answer": final_answer,
                     "sql": sql_to_return,
                     "data": data_to_return,
                     "error": None
@@ -1002,11 +805,11 @@ class LLMService:
                     "data": None,
                     "error": None
                 }
-                
+
         except Exception as e:
-            logger.exception("Error in Ollama processing")
+            logger.exception("Error in Claude processing")
             return {
-                "answer": f"Ollama Error: {str(e)}",
+                "answer": f"Claude Error: {str(e)}",
                 "sql": None,
                 "data": None,
                 "error": str(e)
