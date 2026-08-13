@@ -1,25 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './components/MessageBubble';
+import LoginPage from './components/LoginPage';
 import './App.css';
 
-// Default endpoint fallback
-const getInitialEndpoint = () => {
+// Backend API endpoint — set via VITE_API_URL at build time or cached from a prior session.
+const getApiEndpoint = () => {
   const envUrl = import.meta.env.VITE_API_URL;
   const savedUrl = localStorage.getItem('__mysql_chat_api_endpoint__') || localStorage.getItem('__sf_chat_api_endpoint__');
   return savedUrl || envUrl || 'http://localhost:8000';
 };
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('__dce_current_user__') || null);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [queryLoading, setQueryLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState('connecting'); // online | offline | connecting
   const [activeModel, setActiveModel] = useState('');
+  const [connections, setConnections] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Dynamic API endpoint configuration
-  const [apiEndpoint, setApiEndpoint] = useState(getInitialEndpoint());
-  const [showSettings, setShowSettings] = useState(false);
-  const [tempEndpoint, setTempEndpoint] = useState(apiEndpoint);
+  const apiEndpoint = getApiEndpoint();
 
   const messagesEndRef = useRef(null);
 
@@ -28,29 +29,32 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, queryLoading]);
 
-  // Fetch Server Status on mount/endpoint change
-  const checkStatus = async (targetEndpoint = apiEndpoint) => {
+  // Fetch Server Status on mount
+  const checkStatus = async () => {
     setServerStatus('connecting');
     try {
-      const statusRes = await fetch(`${targetEndpoint}/api/`, {
+      const statusRes = await fetch(`${apiEndpoint}/api/`, {
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         setServerStatus('online');
         setActiveModel(statusData.provider || 'AI Model');
+        setConnections(statusData.connections || []);
       } else {
         setServerStatus('offline');
+        setConnections([]);
       }
     } catch (err) {
       console.error("Failed to connect to API backend:", err);
       setServerStatus('offline');
+      setConnections([]);
     }
   };
 
   useEffect(() => {
     checkStatus();
-  }, [apiEndpoint]);
+  }, []);
 
   const handleSendMessage = async (textToSend) => {
     const queryText = textToSend || inputValue;
@@ -89,7 +93,8 @@ export default function App() {
         text: result.answer,
         sql: result.sql,
         data: result.data,
-        error: result.error
+        error: result.error,
+        source: result.source
       };
 
       setMessages(prev => [...prev, assistantMsg]);
@@ -112,118 +117,93 @@ export default function App() {
     }
   };
 
+  const handleLogin = (userId) => {
+    localStorage.setItem('__dce_current_user__', userId);
+    setCurrentUser(userId);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('__dce_current_user__');
+    setCurrentUser(null);
+  };
+
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  const statusColor = serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)';
+
   return (
     <div className="app-container">
-      {/* Main Chat Workstation */}
-      <div className="main-chat-area">
+      {/* Left Sidebar — backend connections, model info, account */}
+      <aside className={`app-sidebar ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
+        <div className="sidebar-brand">
+          <h1>Pharma AI Agent</h1>
+          <button className="sidebar-toggle-btn" onClick={() => setSidebarOpen(false)} title="Collapse sidebar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="9" y1="4" x2="9" y2="20" />
+            </svg>
+          </button>
+        </div>
 
-        {/* Navigation / Header */}
-        <div className="chat-header">
-          <div className="chat-header-title">
-            <div className="header-logo">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" fill="url(#dbGrad)" />
-                <path d="M8 12l2 2 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <defs>
-                  <linearGradient id="dbGrad" x1="2" y1="2" x2="22" y2="22">
-                    <stop offset="0%" stopColor="#00A1E0" />
-                    <stop offset="100%" stopColor="#032D60" />
-                  </linearGradient>
-                </defs>
-              </svg>
-              <h1>Rx Leakage Command Center</h1>
+        <div className="sidebar-scroll">
+          {/* Backend System Connections */}
+          <div className="sidebar-section">
+            <h4 className="sidebar-section-title">Backend Connections</h4>
+
+            <div className="connection-row">
+              <span className="connection-dot" style={{ backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}` }} />
+              <span className="connection-name">API Server</span>
+              <span className="connection-state" style={{ color: statusColor }}>{serverStatus}</span>
             </div>
+
+            {connections.map((conn) => {
+              const dotColor = conn.status === 'connected' ? 'var(--status-success)' : conn.status === 'error' ? 'var(--status-danger)' : 'var(--status-warning)';
+              return (
+                <div className="connection-row" key={conn.name} title={conn.detail || ''}>
+                  <span className="connection-dot" style={{ backgroundColor: dotColor, boxShadow: `0 0 6px ${dotColor}` }} />
+                  <span className="connection-name">{conn.name}</span>
+                  <span className="connection-state" style={{ color: dotColor }}>{conn.status}</span>
+                </div>
+              );
+            })}
           </div>
-          <div className="chat-header-status">
-            <span>Model: <strong>{activeModel || 'Detecting...'}</strong></span>
-            <div className="status-dot" style={{
-              backgroundColor: serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)',
-              boxShadow: `0 0 8px ${serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)'}`
-            }} />
-            <span style={{ fontSize: '0.8rem', textTransform: 'capitalize' }}>{serverStatus}</span>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: '1rem',
-                display: 'flex',
-                alignItems: 'center',
-                padding: '4px',
-                marginLeft: '8px',
-                transition: 'transform 0.2s ease'
-              }}
-              title="Configure Backend Connection"
-            >
-              ⚙️
-            </button>
+
+          {/* AI Model */}
+          <div className="sidebar-section">
+            <h4 className="sidebar-section-title">AI Model</h4>
+            <div className="model-info-row">
+              <span className="model-name">{activeModel || 'Detecting...'}</span>
+            </div>
           </div>
         </div>
 
-        {/* Dynamic Endpoint Configuration Panel */}
-        {showSettings && (
-          <div className="endpoint-settings-panel" style={{
-            background: 'var(--bg-tertiary)',
-            borderBottom: '1px solid var(--border-color)',
-            padding: '12px 32px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            fontSize: '0.85rem',
-            animation: 'slideDown 0.2s ease'
-          }}>
-            <span style={{ fontWeight: '600', color: 'var(--text-secondary)' }}>Connection Endpoint:</span>
-            <input
-              type="text"
-              value={tempEndpoint}
-              onChange={(e) => setTempEndpoint(e.target.value)}
-              placeholder="e.g. https://abc123.ngrok-free.app or http://localhost:8000"
-              style={{
-                flex: 1,
-                padding: '6px 12px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                outline: 'none',
-                fontSize: '0.85rem'
-              }}
-            />
-            <button
-              onClick={() => {
-                const cleanUrl = tempEndpoint.trim().replace(/\/$/, ""); // trim trailing slash
-                localStorage.setItem('__mysql_chat_api_endpoint__', cleanUrl);
-                setApiEndpoint(cleanUrl);
-                setTempEndpoint(cleanUrl);
-                setShowSettings(false);
-              }}
-              style={{
-                background: 'var(--accent-primary)',
-                color: 'white',
-                border: 'none',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: '600'
-              }}
-            >
-              Save
-            </button>
-            <button
-              onClick={() => {
-                setTempEndpoint(apiEndpoint);
-                setShowSettings(false);
-              }}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
-            >
-              Cancel
-            </button>
+        {/* Logged-in User */}
+        <div className="sidebar-user">
+          <div className="user-avatar">{currentUser.charAt(0).toUpperCase()}</div>
+          <div className="user-meta">
+            <span className="user-name">{currentUser}</span>
+            <span className="user-role">Signed in</span>
           </div>
-        )}
+          <button className="logout-icon-btn" onClick={handleLogout} title="Logout">
+            🚪
+          </button>
+        </div>
+      </aside>
+
+      {/* Reopen control — shown only while the sidebar is collapsed */}
+      {!sidebarOpen && (
+        <button className="sidebar-expand-btn" onClick={() => setSidebarOpen(true)} title="Expand sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <line x1="9" y1="4" x2="9" y2="20" />
+          </svg>
+        </button>
+      )}
+
+      {/* Main Chat Workstation */}
+      <div className="main-chat-area">
 
         {/* Messaging Box */}
         <div className="messages-container">
@@ -241,7 +221,8 @@ export default function App() {
                   </defs>
                 </svg>
               </div>
-              <h3>Rx Leakage Command Center 🏥</h3>
+              <h3>Pharma Command Center 🏥</h3>
+              <p className="empty-state-tagline">Pharma AI Agent</p>
               <p>
                 Ask questions about Leakage Signals (UC1) and Journey Orchestration & HCP Fatigue (UC2). The AI will translate your questions into governed SQL and display real-time analytics!
               </p>

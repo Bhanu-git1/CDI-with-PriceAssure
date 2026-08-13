@@ -11,6 +11,13 @@ from app.llm_service import llm_service, db_service, sf_service
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dce-fastapi-app")
 
+# Tracks live/last-known health of each backend data connection, refreshed at
+# startup, so the UI can list each one's status individually.
+connection_status = {
+    "mysql": {"name": "MySQL Database", "status": "unknown", "detail": None},
+    "salesforce": {"name": "Salesforce CRM", "status": "unknown", "detail": None},
+}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Verify credentials & connection to MySQL (UC1/UC2)
@@ -18,8 +25,11 @@ async def lifespan(app: FastAPI):
     try:
         conn = db_service.get_connection()
         conn.close()
+        connection_status["mysql"]["status"] = "connected"
         logger.info("MySQL connection verified successfully (DCE).")
     except Exception as e:
+        connection_status["mysql"]["status"] = "error"
+        connection_status["mysql"]["detail"] = str(e)
         logger.error(f"Failed to establish MySQL connection on startup: {e}")
 
     # Startup: Verify credentials & connection to Salesforce (UC3). Non-fatal —
@@ -27,8 +37,11 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing Salesforce DCE workspace (UC3)...")
     try:
         sf_service.get_connection()
+        connection_status["salesforce"]["status"] = "connected"
         logger.info("Salesforce connection verified successfully (DCE).")
     except Exception as e:
+        connection_status["salesforce"]["status"] = "error"
+        connection_status["salesforce"]["detail"] = str(e)
         logger.error(f"Failed to establish Salesforce connection on startup: {e}")
 
     yield
@@ -81,6 +94,7 @@ def read_root():
     return {
         "status": "online",
         "provider": provider,
+        "connections": list(connection_status.values()),
         "dce_service": "mysql-service + salesforce-service (active)",
         "platform": "MySQL Database (UC1/UC2) + Salesforce CRM (UC3)"
     }

@@ -493,7 +493,9 @@ class LLMService:
 
         if self._is_salesforce_query(user_message):
             logger.info("Routing chat request to Salesforce (UC3) pipeline")
-            return await self._process_salesforce_chat(user_message, history_context)
+            result = await self._process_salesforce_chat(user_message, history_context)
+            result["source"] = "Salesforce"
+            return result
 
         context_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
@@ -505,9 +507,11 @@ class LLMService:
 
         logger.info(f"Processing chat request using provider: {self.provider}")
         if self.provider == "groq":
-            return await self._process_groq(user_message, context_prompt)
+            result = await self._process_groq(user_message, context_prompt)
         else:
-            return await self._process_claude(user_message, context_prompt)
+            result = await self._process_claude(user_message, context_prompt)
+        result["source"] = "MySQL"
+        return result
 
     def _get_refinement_instructions(self) -> str:
         return (

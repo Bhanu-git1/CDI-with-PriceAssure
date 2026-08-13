@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import DataTable from './DataTable';
 
+function Markdown({ children }) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children || ''}</ReactMarkdown>
+    </div>
+  );
+}
+
 export default function MessageBubble({ message }) {
-  const { sender, text, sql, data, error } = message;
+  const { sender, text, sql, data, error, source } = message;
   const [activeTab, setActiveTab] = useState('explanation'); // explanation | table | chart
   const [showSql, setShowSql] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -40,7 +50,7 @@ export default function MessageBubble({ message }) {
 
             <div className="vis-content">
               {activeTab === 'explanation' && (
-                <div style={{ whiteSpace: 'pre-line' }}>{text}</div>
+                <Markdown>{text}</Markdown>
               )}
               {activeTab === 'table' && (
                 <DataTable data={data} />
@@ -48,30 +58,38 @@ export default function MessageBubble({ message }) {
             </div>
           </div>
         ) : (
-          <div style={{ whiteSpace: 'pre-line' }}>{text}</div>
+          <Markdown>{text}</Markdown>
         )}
 
         {/* Display SQL block under explanation if available */}
         {sender === 'assistant' && sql && (
           <div style={{ marginTop: '12px' }}>
-            <button
-              onClick={() => setShowSql(!showSql)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--accent-secondary)',
-                cursor: 'pointer',
-                fontSize: '0.8rem',
-                fontWeight: '600',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '2px 0'
-              }}
-            >
-              {showSql ? `Hide Generated ${queryLabel} 🔼` : `Show Generated ${queryLabel} 🔽`}
-            </button>
-            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setShowSql(!showSql)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--accent-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 0'
+                }}
+              >
+                {showSql ? `Hide Generated ${queryLabel} 🔼` : `Show Generated ${queryLabel} 🔽`}
+              </button>
+
+              {source && (
+                <span className={`source-badge source-badge-${source.toLowerCase()}`}>
+                  {source === 'Salesforce' ? '☁️' : '🗄️'} Source: {source}
+                </span>
+              )}
+            </div>
+
             {showSql && (
           <div className="sql-container">
             <div className="sql-header">
