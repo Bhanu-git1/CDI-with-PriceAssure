@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './components/MessageBubble';
 import LoginPage from './components/LoginPage';
+import logoMain from './logo main.png';
 import './App.css';
 
 // Backend API endpoint — set via VITE_API_URL at build time or cached from a prior session.
@@ -10,6 +11,9 @@ const getApiEndpoint = () => {
   return savedUrl || envUrl || 'http://localhost:8000';
 };
 
+// How often to silently re-check backend/connection/LLM health in the background.
+const STATUS_POLL_MS = 15000;
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('__dce_current_user__') || null);
   const [messages, setMessages] = useState([]);
@@ -18,6 +22,7 @@ export default function App() {
   const [serverStatus, setServerStatus] = useState('connecting'); // online | offline | connecting
   const [activeModel, setActiveModel] = useState('');
   const [connections, setConnections] = useState([]);
+  const [llmStatus, setLlmStatus] = useState('connecting'); // connected | offline | connecting
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const apiEndpoint = getApiEndpoint();
@@ -29,9 +34,14 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, queryLoading]);
 
-  // Fetch Server Status on mount
-  const checkStatus = async () => {
-    setServerStatus('connecting');
+  // Live backend/connection/LLM status check. Only shows the transient
+  // "connecting" state on the very first load — background polls update
+  // straight to the resolved status so the UI doesn't flicker every cycle.
+  const checkStatus = async (isInitial = false) => {
+    if (isInitial) {
+      setServerStatus('connecting');
+      setLlmStatus('connecting');
+    }
     try {
       const statusRes = await fetch(`${apiEndpoint}/api/`, {
         headers: { 'ngrok-skip-browser-warning': 'true' }
@@ -41,19 +51,26 @@ export default function App() {
         setServerStatus('online');
         setActiveModel(statusData.provider || 'AI Model');
         setConnections(statusData.connections || []);
+        setLlmStatus(statusData.llm?.status || 'offline');
       } else {
         setServerStatus('offline');
         setConnections([]);
+        setLlmStatus('offline');
       }
     } catch (err) {
       console.error("Failed to connect to API backend:", err);
       setServerStatus('offline');
       setConnections([]);
+      setLlmStatus('offline');
     }
   };
 
+  // Check immediately on load, then keep polling in the background so
+  // status reflects reality live, without requiring a page refresh.
   useEffect(() => {
-    checkStatus();
+    checkStatus(true);
+    const interval = setInterval(() => checkStatus(false), STATUS_POLL_MS);
+    return () => clearInterval(interval);
   }, []);
 
   const handleSendMessage = async (textToSend) => {
@@ -131,20 +148,29 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  const statusColor = serverStatus === 'online' ? 'var(--status-success)' : serverStatus === 'connecting' ? 'var(--status-warning)' : 'var(--status-danger)';
+  // Shared color mapping for every status dot in the sidebar: healthy states
+  // (online/connected) are green, the transient initial check is amber, and
+  // every other state (offline, or anything unexpected) is red.
+  const statusToColor = (status) => {
+    if (status === 'online' || status === 'connected') return 'var(--status-success)';
+    if (status === 'connecting') return 'var(--status-warning)';
+    return 'var(--status-danger)';
+  };
+  const statusColor = statusToColor(serverStatus);
+  const llmColor = statusToColor(llmStatus);
 
   return (
     <div className="app-container">
       {/* Left Sidebar — backend connections, model info, account */}
       <aside className={`app-sidebar ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
         <div className="sidebar-brand">
-          <h1>Pharma AI Agent</h1>
           <button className="sidebar-toggle-btn" onClick={() => setSidebarOpen(false)} title="Collapse sidebar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="4" width="18" height="16" rx="2" />
               <line x1="9" y1="4" x2="9" y2="20" />
             </svg>
           </button>
+          <img src={logoMain} alt="Pharma AI Agent" className="sidebar-brand-logo" />
         </div>
 
         <div className="sidebar-scroll">
@@ -159,12 +185,12 @@ export default function App() {
             </div>
 
             {connections.map((conn) => {
-              const dotColor = conn.status === 'connected' ? 'var(--status-success)' : conn.status === 'error' ? 'var(--status-danger)' : 'var(--status-warning)';
+              const dotColor = statusToColor(conn.status);
               return (
                 <div className="connection-row" key={conn.name} title={conn.detail || ''}>
                   <span className="connection-dot" style={{ backgroundColor: dotColor, boxShadow: `0 0 6px ${dotColor}` }} />
                   <span className="connection-name">{conn.name}</span>
-                  <span className="connection-state" style={{ color: dotColor }}>{conn.status}</span>
+                  <span className="connection-state" style={{ color: dotColor }}>{conn.status === 'connected' ? 'online' : conn.status}</span>
                 </div>
               );
             })}
@@ -173,8 +199,10 @@ export default function App() {
           {/* AI Model */}
           <div className="sidebar-section">
             <h4 className="sidebar-section-title">AI Model</h4>
-            <div className="model-info-row">
-              <span className="model-name">{activeModel || 'Detecting...'}</span>
+            <div className="connection-row" title={activeModel || ''}>
+              <span className="connection-dot" style={{ backgroundColor: llmColor, boxShadow: `0 0 6px ${llmColor}` }} />
+              <span className="connection-name">{activeModel || 'Detecting...'}</span>
+              <span className="connection-state" style={{ color: llmColor }}>{llmStatus === 'connected' ? 'online' : llmStatus}</span>
             </div>
           </div>
         </div>
@@ -210,16 +238,7 @@ export default function App() {
           {messages.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="url(#emptyGrad)" strokeWidth="1.5" />
-                  <path d="M8 12l2 2 4-4" stroke="url(#emptyGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  <defs>
-                    <linearGradient id="emptyGrad" x1="4" y1="4" x2="20" y2="20">
-                      <stop offset="0%" stopColor="#00A1E0" />
-                      <stop offset="100%" stopColor="#1B96FF" />
-                    </linearGradient>
-                  </defs>
-                </svg>
+                <img src={logoMain} alt="" />
               </div>
               <h3>Pharma Command Center 🏥</h3>
               <p className="empty-state-tagline">Pharma AI Agent</p>

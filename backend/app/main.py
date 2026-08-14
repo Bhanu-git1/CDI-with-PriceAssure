@@ -1,6 +1,8 @@
+import asyncio
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
@@ -11,38 +13,39 @@ from app.llm_service import llm_service, db_service, sf_service
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dce-fastapi-app")
 
-# Tracks live/last-known health of each backend data connection, refreshed at
-# startup, so the UI can list each one's status individually.
-connection_status = {
-    "mysql": {"name": "MySQL Database", "status": "unknown", "detail": None},
-    "salesforce": {"name": "Salesforce CRM", "status": "unknown", "detail": None},
-}
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup: Verify credentials & connection to MySQL (UC1/UC2)
-    logger.info("Initializing MySQL DCE workspace...")
+def _check_mysql() -> dict:
+    """
+    Live MySQL connectivity check. Never raises — a failed/unreachable
+    connection is reported as "offline", not "error"; "error" is reserved
+    for genuine application bugs, not a disconnected service.
+    """
     try:
         conn = db_service.get_connection()
         conn.close()
-        connection_status["mysql"]["status"] = "connected"
-        logger.info("MySQL connection verified successfully (DCE).")
+        return {"name": "MySQL Database", "status": "connected", "detail": None}
     except Exception as e:
-        connection_status["mysql"]["status"] = "error"
-        connection_status["mysql"]["detail"] = str(e)
-        logger.error(f"Failed to establish MySQL connection on startup: {e}")
+        return {"name": "MySQL Database", "status": "offline", "detail": str(e)}
 
-    # Startup: Verify credentials & connection to Salesforce (UC3). Non-fatal —
-    # UC1/UC2 must keep working even if Salesforce is unreachable/misconfigured.
-    logger.info("Initializing Salesforce DCE workspace (UC3)...")
+
+def _check_salesforce() -> dict:
+    """Live Salesforce connectivity check — see _check_mysql for status semantics."""
     try:
         sf_service.get_connection()
-        connection_status["salesforce"]["status"] = "connected"
-        logger.info("Salesforce connection verified successfully (DCE).")
+        return {"name": "Salesforce CRM", "status": "connected", "detail": None}
     except Exception as e:
-        connection_status["salesforce"]["status"] = "error"
-        connection_status["salesforce"]["detail"] = str(e)
-        logger.error(f"Failed to establish Salesforce connection on startup: {e}")
+        return {"name": "Salesforce CRM", "status": "offline", "detail": str(e)}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: log initial reachability. The authoritative status is recomputed
+    # live on every "/api/" request (see read_root) so the UI never goes stale.
+    logger.info("Initializing MySQL DCE workspace...")
+    logger.info(f"MySQL connection check: {_check_mysql()['status']}")
+
+    logger.info("Initializing Salesforce DCE workspace (UC3)...")
+    logger.info(f"Salesforce connection check: {_check_salesforce()['status']}")
 
     yield
 
@@ -83,7 +86,7 @@ class ChatRequest(BaseModel):
 @app.get("/api/")
 @app.get("/api")
 @app.get("/")
-def read_root():
+async def read_root():
     if settings.GROQ_API_KEY:
         provider = f"Groq ({settings.GROQ_MODEL})"
     elif settings.CLAUDE_API_KEY:
@@ -91,10 +94,20 @@ def read_root():
     else:
         provider = "Not configured"
 
+    # Run all three health checks concurrently. MySQL/Salesforce use blocking
+    # client libraries, so they're offloaded to a thread pool; the LLM check
+    # is native async.
+    mysql_health, sf_health, llm_health = await asyncio.gather(
+        run_in_threadpool(_check_mysql),
+        run_in_threadpool(_check_salesforce),
+        llm_service.check_llm_health(),
+    )
+
     return {
         "status": "online",
         "provider": provider,
-        "connections": list(connection_status.values()),
+        "connections": [mysql_health, sf_health],
+        "llm": {"name": provider, "status": llm_health["status"], "detail": llm_health["detail"]},
         "dce_service": "mysql-service + salesforce-service (active)",
         "platform": "MySQL Database (UC1/UC2) + Salesforce CRM (UC3)"
     }

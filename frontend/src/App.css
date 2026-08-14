@@ -64,6 +64,13 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+.login-logo {
+  height: 42px;
+  width: auto;
+  object-fit: contain;
+  margin-bottom: 16px;
+}
+
 .login-card h1 {
   font-size: 1.3rem;
   font-weight: 700;
@@ -166,20 +173,18 @@
 }
 
 .sidebar-brand {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: center;
   padding: 22px 20px;
   border-bottom: 1px solid var(--border-color);
-  white-space: nowrap;
 }
 
-.sidebar-brand h1 {
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--text-primary);
+.sidebar-brand-logo {
+  height: 36px;
+  width: auto;
+  object-fit: contain;
 }
 
 .sidebar-toggle-btn,
@@ -195,6 +200,12 @@
   justify-content: center;
   flex-shrink: 0;
   transition: background 0.2s ease, color 0.2s ease;
+}
+
+.sidebar-toggle-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
 }
 
 .sidebar-toggle-btn:hover,
@@ -261,21 +272,6 @@
   text-transform: capitalize;
 }
 
-.model-info-row {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px;
-  background: rgba(1, 118, 211, 0.05);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-}
-
-.model-name {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-}
 
 .sidebar-user {
   display: flex;
@@ -368,13 +364,11 @@
   gap: 16px;
 }
 
-.empty-state-icon {
-  animation: pulse-glow 3s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.7; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.05); }
+.empty-state-icon img {
+  width: 240px;
+  max-width: 80%;
+  height: auto;
+  object-fit: contain;
 }
 
 .empty-state h3 {

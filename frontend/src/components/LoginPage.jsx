@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import logoMain from '../logo main.png';
 
 export default function LoginPage({ onLogin }) {
   const [userId, setUserId] = useState('');
@@ -13,6 +14,7 @@ export default function LoginPage({ onLogin }) {
   return (
     <div className="login-screen">
       <div className="login-card">
+        <img src={logoMain} alt="" className="login-logo" />
         <h1>Pharma AI Agent</h1>
         <p className="login-subtitle">Sign in to access the AI data assistant</p>
 

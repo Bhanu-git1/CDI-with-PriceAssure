@@ -156,6 +156,29 @@ class LLMService:
             except Exception as inner_e:
                 return f"Could not establish MySQL connection details. Error: {inner_e}"
 
+    async def check_llm_health(self) -> Dict[str, Any]:
+        """
+        Lightweight liveness check for the configured LLM provider, used for
+        UI status monitoring. Hits a metadata endpoint only — no completion
+        tokens are consumed and no chat rate-limit budget is spent.
+        """
+        try:
+            if self.provider == "groq":
+                headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get("https://api.groq.com/openai/v1/models", headers=headers)
+                if resp.status_code == 200:
+                    return {"status": "connected", "detail": None}
+                return {"status": "offline", "detail": f"Groq API returned HTTP {resp.status_code}"}
+            elif self.provider == "claude":
+                await self.claude_client.models.retrieve(settings.CLAUDE_MODEL)
+                return {"status": "connected", "detail": None}
+            else:
+                return {"status": "offline", "detail": "No LLM provider configured"}
+        except Exception as e:
+            logger.warning(f"LLM health check failed: {e}")
+            return {"status": "offline", "detail": str(e)}
+
     def _load_sf_semantic_layer(self) -> str:
         """Load the Salesforce (UC3) semantic layer YAML file if available."""
         try:

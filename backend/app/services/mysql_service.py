@@ -43,7 +43,8 @@ class MySQLService:
                     user=self.user,
                     password=self.password,
                     database=self.database,
-                    autocommit=True
+                    autocommit=True,
+                    connection_timeout=5
                 )
                 logger.info(f"Successfully created MySQL connection pool for database '{self.database}'.")
             except MySQLError as e:
