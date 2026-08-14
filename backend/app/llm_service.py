@@ -67,7 +67,7 @@ WARNING: DO NOT use copay_Claims_Transactions or Reverse_Claims for claims/rejec
 
 RULES:
 - ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
-- NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- NEVER invent table or column names. Use ONLY columns, listed in the governance block.
 - For ALL claims, claim rejections, rejected claims, or rejection keywords, ALWAYS use `Leakage_Activity` (Pharmacy_Rejections, Total_Brand_Rejections). DO NOT use `copay_Claims_Transactions`.
 - Use standard MySQL SQL syntax.
 - Use ONLY the VERIFIED JOIN PATHS defined in governance block. Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
