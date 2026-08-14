@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './components/MessageBubble';
 import LoginPage from './components/LoginPage';
-import logoMain from './logo main.png';
+import logoMain from './assets/SRM_logo.png';
 import './App.css';
 
 // Backend API endpoint — set via VITE_API_URL at build time or cached from a prior session.

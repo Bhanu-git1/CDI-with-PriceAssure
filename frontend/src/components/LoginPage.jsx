@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import logoMain from '../logo main.png';
+import logoMain from '../assets/SRM_logo.png';
 
 export default function LoginPage({ onLogin }) {
   const [userId, setUserId] = useState('');
