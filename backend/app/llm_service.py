@@ -41,7 +41,8 @@ code_executor_sf = CodeExecutor(sf_service, global_name="sf")
 MYSQL_PRIORITY_KEYWORDS = (
     "leakage", "fatigue", "compliance", "campaign", "claim", "claims",
     "rejection", "rejections", "pharmacy", "engagement", "mysql",
-    "prescriber", "npi",
+    "prescriber", "npi", "medicine", "medicines", "clinical", "tablet",
+    "dosage", "extract", "extraction"
 )
 SALESFORCE_KEYWORDS = (
     "salesforce", "doctor", "doctors", "sales rep", "sales reps",
@@ -326,12 +327,18 @@ class LLMService:
                 result_data = execution["result"]
                 logger.info(f"Sandbox execution results (Salesforce): {result_data}")
 
+                # Limit size of data passed to LLM for summarization to avoid token limit errors
+                result_str = json.dumps(result_data, default=str)
+                if len(result_str) > 6000:
+                    result_str = result_str[:6000] + "\n... (data truncated due to length, refer to table view for full data)"
+
                 final_prompt = (
                     f"You are a helpful Salesforce data assistant.\n"
                     f"User asked: {user_message}\n"
                     f"You executed this Python/SOQL code:\n{code}\n"
-                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
+                    f"Execution result: {result_str}\n\n"
                     f"Provide a clear, direct, and professional natural language response summarizing the findings. "
+                    f"If the user asks for a list, include the requested details in your response. "
                     f"If 0 records were returned, state politely that no records matched the criteria in the Salesforce org and suggest alternative terms."
                 )
 
@@ -516,6 +523,7 @@ class LLMService:
             f"{self._get_refinement_instructions()}\n\n"
             f"{self.semantic_loader.get_semantic_context_prompt()}\n\n"
             f"{history_context}"
+            f"CRITICAL REMINDER: You are currently operating in the MySQL database environment. You MUST generate Python code using `db.execute_sql()` to retrieve data from MySQL tables like `Tablet_Extract_History` or `medicine_extraction_log`. Do NOT mention Salesforce or SOQL.\n\n"
             f"User Question: {user_message}"
         )
 
@@ -704,13 +712,17 @@ class LLMService:
                 result_data = execution["result"]
                 logger.info(f"Sandbox execution results: {result_data}")
 
-                # Summarize results with LLM
+                # Limit size of data passed to LLM for summarization to avoid token limit errors
+                result_str = json.dumps(result_data, default=str)
+                if len(result_str) > 6000:
+                    result_str = result_str[:6000] + "\n... (data truncated due to length, refer to table view for full data)"
+
                 final_prompt = (
                     f"You are a MySQL data expert.\n"
                     f"User asked: {user_message}\n"
                     f"You ran this Python code:\n{code}\n"
-                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
-                    f"Provide a natural language summary of the results. Be clear and direct."
+                    f"Execution result: {result_str}\n\n"
+                    f"Provide a natural language summary of the results. Be clear and direct. If the user asks for a list, include the requested details in your response."
                 )
                 
                 try:
@@ -785,13 +797,17 @@ class LLMService:
                 result_data = execution["result"]
                 logger.info(f"Sandbox execution results: {result_data}")
 
-                # Summarize results with LLM
+                # Limit size of data passed to LLM for summarization to avoid token limit errors
+                result_str = json.dumps(result_data, default=str)
+                if len(result_str) > 6000:
+                    result_str = result_str[:6000] + "\n... (data truncated due to length, refer to table view for full data)"
+
                 final_prompt = (
                     f"You are a MySQL data expert.\n"
                     f"User asked: {user_message}\n"
                     f"You ran this Python code:\n{code}\n"
-                    f"Execution result: {json.dumps(result_data, default=str)}\n\n"
-                    f"Provide a natural language summary of the results. Be clear and direct."
+                    f"Execution result: {result_str}\n\n"
+                    f"Provide a natural language summary of the results. Be clear and direct. If the user asks for a list, include the requested details in your response."
                 )
 
                 try:
