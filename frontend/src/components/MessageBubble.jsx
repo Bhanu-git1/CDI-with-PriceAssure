@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import DataTable from './DataTable';
+import DataChart from './DataChart';
 
 function Markdown({ children }) {
   return (
@@ -54,6 +55,10 @@ export default function MessageBubble({ message }) {
               )}
               {activeTab === 'table' && (
                 <DataTable data={data} />
+              )}
+
+              {activeTab === 'chart' && (
+                <DataChart data={data} />
               )}
             </div>
           </div>

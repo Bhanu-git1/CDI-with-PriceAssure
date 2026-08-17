@@ -52,81 +52,71 @@ SALESFORCE_KEYWORDS = (
 
 SYSTEM_PROMPT = """
 You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
-The database powers a Pharma Commercial Command Centre with UC1 (Leakage Signals) and UC2 (Journey Orchestration & HCP Fatigue).
+The database powers a Pharma Commercial Command Centre with 5 integrated Use Cases:
+  - UC1: Leakage Signals (Leakage_Activity, leakage_history, Reverse_Claims, Compliance_Table)
+  - UC2: Journey Orchestration & HCP Fatigue (fatigue_score, hcp_engagement_logs, campaign_master)
+  - UC3: Voice Work Detail Manager & HCP Interaction Recording (hcp_master_details, hcp_master_workdetails_history, rep_details)
+  - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History, medicine_extraction_log)
+  - UC5: Salesforce Integration & Sync Audit (salesforce_sync_log, Tablet_Extract_History, hcp_master_details)
 
 UI DASHBOARD displays data from PRIMARY TABLES:
-  1. Leakage_Activity (60 rows) — Main leakage records table
-  2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60)
-  3. leakage_history (13 rows) — Threshold update log
-  4. Compliance_Table (111 rows) — Govt plans bypassed KPI
-
-PRIMARY TABLE FOR CLAIMS & REJECTIONS ANALYSIS:
-  1. Leakage_Activity (60 rows) — Use for ALL claims, rejection claims, pharmacy rejections, brand rejections, and leakage queries.
-     Columns: HCP_Name, BrandName, Pharmacy_ID, zip_code, Prescriber_NPI, State, Pharmacy_Rejections, Total_Brand_Rejections, Leakage_Percentage.
-
-WARNING: DO NOT use copay_Claims_Transactions or Reverse_Claims for claims/rejections analysis. Use Leakage_Activity instead.
+  1. Leakage_Activity (60 rows) — Main leakage records table (UC1)
+  2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60) (UC2)
+  3. leakage_history (13 rows) — Threshold update log (UC1)
+  4. Compliance_Table (111 rows) — Govt plans bypassed KPI (UC1)
+  5. hcp_master_details — Main UC3/UC5 table (Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, sf_id, created_at, updated_at)
+  6. hcp_master_workdetails_history — UC3 audit trail history table (history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime)
+  7. Tablet_Extract_History — UC4 medicine extraction table (167 rows: id, Tablet_name, Dosage, Frequency, guidance, timestamp, Prescriber_NPI, sf_id, status, message)
+  8. Transcript_Extraction_History — UC4 transcript extraction log (id, hcp_detail_id, Prescriber_NPI, sf_id, transcript_text, tablet_names, status, created_at)
+  9. medicine_extraction_log — UC4 medicine extraction summary log (extraction_id, Prescriber_NPI, HCP_Name, extracted_drug, brand_name, generic_name, dosage, frequency, confidence_score)
+  10. salesforce_sync_log — UC5 Salesforce CRM sync status log (sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sf_record_id, sync_status, sync_message)
+  11. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
+  12. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
 
 RULES:
 - ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
-- NEVER invent table or column names. Use ONLY columns, listed in the governance block.
-- For ALL claims, claim rejections, rejected claims, or rejection keywords, ALWAYS use `Leakage_Activity` (Pharmacy_Rejections, Total_Brand_Rejections). DO NOT use `copay_Claims_Transactions`.
+- NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- For ALL claims and rejection queries, use `Leakage_Activity`.
+- For ALL medicine, tablet, drug extraction queries (UC4), use `Tablet_Extract_History` or `medicine_extraction_log` (joined with `hcp_master_details` on `Prescriber_NPI` to get HCP name: `CONCAT(hmd.hcp_firstName, ' ', hmd.hcp_lastName) AS HCP_Name`).
+- For Salesforce CRM sync/push queries (UC5), use `salesforce_sync_log` or `hcp_master_details` (sf_id, status, updated_at).
 - Use standard MySQL SQL syntax.
-- Use ONLY the VERIFIED JOIN PATHS defined in governance block. Use table aliases: la = Leakage_Activity, cct = copay_Claims_Transactions, pm = Product_Master, hm = hcp_master, zg = Zip_Geography_Master, ct = Compliance_Table, pay = Payer_Master, hel = hcp_engagement_logs, cm = campaign_master, fs = fatigue_score, lh = leakage_history, rcm = Reject_Code_Master.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 """
 
 # UC3 (Salesforce) system prompt — reused verbatim from the standalone DCE Salesforce project.
 SALESFORCE_SYSTEM_PROMPT = """
-You generate Python code to fetch and analyze data from a Salesforce org for Healthcare Professionals (HCPs / Doctors), Sales Representatives, and Sales Managers.
+You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
+The database powers a Pharma Commercial Command Centre with 5 integrated Use Cases:
+  - UC1: Leakage Signals (Leakage_Activity, leakage_history, Reverse_Claims, Compliance_Table)
+  - UC2: Journey Orchestration & HCP Fatigue (fatigue_score, hcp_engagement_logs, campaign_master)
+  - UC3: Voice Work Detail Manager & HCP Interaction Recording (hcp_master_details, hcp_master_workdetails_history, rep_details)
+  - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History, medicine_extraction_log)
+  - UC5: Salesforce Integration & Sync Audit (salesforce_sync_log, Tablet_Extract_History, hcp_master_details)
 
+UI DASHBOARD displays data from PRIMARY TABLES:
+  1. Leakage_Activity (60 rows) — Main leakage records table (UC1)
+  2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60) (UC2)
+  3. leakage_history (13 rows) — Threshold update log (UC1)
+  4. Compliance_Table (111 rows) — Govt plans bypassed KPI (UC1)
+  5. hcp_master_details — Main UC3/UC5 table (Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, sf_id, created_at, updated_at)
+  6. hcp_master_workdetails_history — UC3 audit trail history table (history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime)
+  7. Tablet_Extract_History — UC4 medicine extraction table (167 rows: id, Tablet_name, Dosage, Frequency, guidance, timestamp, Prescriber_NPI, sf_id, status, message)
+  8. Transcript_Extraction_History — UC4 transcript extraction log (id, hcp_detail_id, Prescriber_NPI, sf_id, transcript_text, tablet_names, status, created_at)
+  9. medicine_extraction_log — UC4 medicine extraction summary log (extraction_id, Prescriber_NPI, HCP_Name, extracted_drug, brand_name, generic_name, dosage, frequency, confidence_score)
+  10. salesforce_sync_log — UC5 Salesforce CRM sync status log (sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sf_record_id, sync_status, sync_message)
+  11. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
+  12. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
 
-########## OBJECT & FIELD MAPPING (SEMANTIC LAYER) ###########
-
-1. Doctor__c (Healthcare Professionals / HCPs / Doctors):
-   - Primary custom object representing Doctors and Healthcare Professionals.
-   - Fields:
-     * HCP_First_Name__c : First name of the HCP
-     * HCP_Last_Name__c : Last name of the HCP
-     * Speciality__c : Medical speciality (e.g. Cardiology, Oncology, Pediatrics, Neurology)
-     * State_License__c : Medical license number
-     * Practice_State__c : State code or name of practice (e.g., CA, NY, TX)
-     * Phone__c : Phone number
-     * Secure_Fax__c : Fax number
-     * Status__c : Record status picklist (Valid values: 'In-Progress' and 'Completed'). Always query `Status__c = 'In-Progress'` for in-progress doctors, or `Status__c = 'Completed'` for completed doctors.
-     * Work_Details__c : Clinic / hospital affiliation and work details
-     * SF_Id__c : Internal/External Salesforce ID
-     * Rep_ID__c : Representative ID assigned to this HCP
-     * Rep_Ids__c : Lookup / Master-Detail reference to Rep_Details__c
-     * Relationship: Rep_Ids__r (Use Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c to query assigned rep details)
-
-2. Rep_Details__c (Sales Representatives / Field Reps):
-   - Primary custom object representing Sales Representatives. (Also referenced in legacy code/metadata as Rep_Detials__c or HCP_Rep_Detail__c).
-   - Fields:
-     * Rep_Id__c : Unique Representative ID
-     * First_Name__c / Rep_firstName__c : Representative First Name
-     * Last_Name__c / Rep_lastName__c : Representative Last Name
-     * Email__c / Rep_Email__c : Representative Email
-     * Phone_Number__c / Rep_Mobile__c : Mobile / Phone number
-     * Rep_Manager__c : Lookup / Master-Detail reference to Rep_Manager__c (Relationship: Rep_Manager__r)
-     * HCP_Master__c : Lookup / Master-Detail reference to Doctor__c (Relationship: HCP_Master__r)
-     * Rep_Date_and_Time__c : Activity datetime timestamp
-     * Manager_Name__c : Manager name
-     * Status__c : Representative status (Active, Inactive)
-
-3. Rep_Manager__c (Sales Representative Managers):
-   - Primary custom object representing Sales Managers. (Also referenced in legacy code as Rep_Master__c).
-   - Fields:
-     * Rep_Manager_Id__c : Unique Manager ID
-     * First_Name__c / Rep_Mgr_firstName__c : Manager First Name
-     * Last_Name__c / Rep_Mgr_lastName__c : Manager Last Name
-     * Email__c / Rep_Mgr_Email__c : Manager Email
-     * Rep_Mgr_Mobile__c : Manager Mobile Phone
-
-CRITICAL QUERYING RULES:
-- Query ONLY custom objects 'Doctor__c', 'Rep_Details__c', or 'Rep_Manager__c'.
-- NEVER query standard objects like 'Task', 'Account', or 'Contact' unless specifically asked.
-- Always use correct relationship fields (e.g. Rep_Ids__r for Doctor__c -> Rep_Details__c, and Rep_Manager__r for Rep_Details__c -> Rep_Manager__c).
+RULES:
+- ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
+- NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- For ALL claims and rejection queries, use `Leakage_Activity`.
+- For ALL medicine, tablet, drug extraction queries (UC4), use `Tablet_Extract_History` or `medicine_extraction_log` (joined with `hcp_master_details` on `Prescriber_NPI` to get HCP name: `CONCAT(hmd.hcp_firstName, ' ', hmd.hcp_lastName) AS HCP_Name`).
+- For Salesforce CRM sync/push queries (UC5), use `salesforce_sync_log` or `hcp_master_details` (sf_id, status, updated_at).
+- Use standard MySQL SQL syntax.
+- When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
+- When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 """
 
 
