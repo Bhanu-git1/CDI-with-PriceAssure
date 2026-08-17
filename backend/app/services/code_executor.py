@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import sys
+import textwrap
 import time
 from typing import Dict, Any, Tuple
 
@@ -82,6 +83,7 @@ class CodeExecutor:
         """Cleans LLM output, strips markdown fences, fixes escaped newlines and concatenated statements."""
         if not code:
             return ""
+        code = textwrap.dedent(code)
         code = code.strip()
         if code.startswith("```python"):
             code = code[9:]
@@ -89,6 +91,7 @@ class CodeExecutor:
             code = code[3:]
         if code.endswith("```"):
             code = code[:-3]
+        code = textwrap.dedent(code)
         code = code.strip()
 
         # Handle escaped \n strings from JSON LLM responses

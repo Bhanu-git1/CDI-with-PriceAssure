@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import httpx
 from typing import Dict, Any, Tuple, Optional
 import anthropic
@@ -605,7 +606,7 @@ class LLMService:
         }
         
         models_to_try = [settings.GROQ_MODEL]
-        for fb in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+        for fb in ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"]:
             if fb not in models_to_try:
                 models_to_try.append(fb)
                 
@@ -616,11 +617,12 @@ class LLMService:
                     payload = {
                         "model": model_name,
                         "messages": messages,
-                        "temperature": temperature
+                        "temperature": temperature,
+                        "reasoning_format": "hidden"
                     }
                     if fmt:
                         payload["response_format"] = fmt
-                        
+
                     logger.info(f"Calling Groq API ({model_name}, json_mode={bool(fmt)})...")
                     resp = await client.post(
                         "https://api.groq.com/openai/v1/chat/completions",
@@ -629,7 +631,9 @@ class LLMService:
                     )
                     if resp.status_code == 200:
                         resp_json = resp.json()
-                        return resp_json["choices"][0]["message"]["content"].strip()
+                        content = resp_json["choices"][0]["message"]["content"].strip()
+                        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+                        return content
                     elif resp.status_code in (400, 429):
                         logger.warning(f"Groq API {resp.status_code} on {model_name} (json_mode={bool(fmt)}). Retrying fallback...")
                         last_error = f"Groq API Error {resp.status_code}: {resp.text}"

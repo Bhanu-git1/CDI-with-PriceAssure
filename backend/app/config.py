@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # LLM Settings
     GROQ_API_KEY: Optional[str] = None
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     CLAUDE_API_KEY: Optional[str] = None
     CLAUDE_MODEL: str = "claude-opus-5"
 

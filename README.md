@@ -12,7 +12,7 @@ Before starting, ensure you have the following installed:
 2. **Python 3.10+** (Ensure it is added to your system `PATH`)
 3. **Node.js (v18+) & npm**
 4. **LLM Provider:**
-   - **Option A (Ultra-Fast Free Cloud):** [Groq API](https://console.groq.com/keys) with `llama-3.3-70b-versatile` (Recommended).
+   - **Option A (Ultra-Fast Free Cloud):** [Groq API](https://console.groq.com/keys) with `openai/gpt-oss-120b` (Recommended).
    - **Option B (Cloud):** A Google Gemini API Key.
    - **Option C (Local):** [Ollama](https://ollama.com/) running locally with the `qwen2.5-coder:7b` model pulled (`ollama pull qwen2.5-coder:7b`).
 
@@ -75,7 +75,7 @@ The backend is a FastAPI server that manages direct sandboxed code execution aga
    MYSQL_DATABASE=accelerator
 
    GROQ_API_KEY=gsk_your_groq_api_key_here
-   GROQ_MODEL=llama-3.3-70b-versatile
+   GROQ_MODEL=openai/gpt-oss-120b
 
    # Optional Cloud or Local Fallbacks
    GEMINI_API_KEY=
