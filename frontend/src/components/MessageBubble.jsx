@@ -14,7 +14,7 @@ function Markdown({ children }) {
 
 export default function MessageBubble({ message }) {
   const { sender, text, sql, data, error, source } = message;
-  const [activeTab, setActiveTab] = useState('explanation'); // explanation | table | chart
+  const [activeTab, setActiveTab] = useState('answer'); // answer | table | chart
   const [showSql, setShowSql] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -36,8 +36,8 @@ export default function MessageBubble({ message }) {
           <div className="visualization-container">
             <div className="vis-tabs">
               <button
-                className={`vis-tab ${activeTab === 'explanation' ? 'active' : ''}`}
-                onClick={() => setActiveTab('explanation')}
+                className={`vis-tab ${activeTab === 'answer' ? 'active' : ''}`}
+                onClick={() => setActiveTab('answer')}
               >
                 💬 Answer
               </button>
@@ -50,8 +50,8 @@ export default function MessageBubble({ message }) {
             </div>
 
             <div className="vis-content">
-              {activeTab === 'explanation' && (
-                <Markdown>{text}</Markdown>
+              {activeTab === 'answer' && (
+                <Markdown>{text || '_No summary available for this response._'}</Markdown>
               )}
               {activeTab === 'table' && (
                 <DataTable data={data} />

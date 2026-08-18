@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import asyncio
 import httpx
 from typing import Dict, Any, Tuple, Optional
 import anthropic
@@ -36,19 +37,21 @@ sf_service = SalesforceService(
 )
 code_executor_sf = CodeExecutor(sf_service, global_name="sf")
 
-# Keyword router between UC1/UC2 (MySQL) and UC3 (Salesforce).
-# MySQL/pharma-domain keywords take priority so existing UC1/UC2 behavior never regresses.
+# Keyword router between UC1/UC2/UC4/UC5 (MySQL) and UC3 (Salesforce direct CRM).
+# MySQL/pharma-domain keywords take priority so existing UC1/UC2/UC4/UC5 behavior never regresses.
 MYSQL_PRIORITY_KEYWORDS = (
     "leakage", "fatigue", "compliance", "campaign", "claim", "claims",
     "rejection", "rejections", "pharmacy", "engagement", "mysql",
     "prescriber", "npi", "medicine", "medicines", "clinical", "tablet",
-    "dosage", "extract", "extraction"
+    "dosage", "extract", "extraction", "sync", "sync_log", "salesforce_sync_log",
+    "transcript", "transcripts", "work detail", "work_detail", "workdetails",
+    "audit", "history_id", "tablet_extract_history", "medicine_extraction_log"
 )
 SALESFORCE_KEYWORDS = (
     "salesforce", "doctor", "doctors", "sales rep", "sales reps",
     "sales representative", "sales representatives", "sales manager",
     "sales managers", "rep manager", "rep managers", "hcp status",
-    "state license", "crm",
+    "state license", "crm", "soql", "sosl"
 )
 
 SYSTEM_PROMPT = """
@@ -57,29 +60,27 @@ The database powers a Pharma Commercial Command Centre with 5 integrated Use Cas
   - UC1: Leakage Signals (Leakage_Activity, leakage_history, Reverse_Claims, Compliance_Table)
   - UC2: Journey Orchestration & HCP Fatigue (fatigue_score, hcp_engagement_logs, campaign_master)
   - UC3: Voice Work Detail Manager & HCP Interaction Recording (hcp_master_details, hcp_master_workdetails_history, rep_details)
-  - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History, medicine_extraction_log)
-  - UC5: Salesforce Integration & Sync Audit (salesforce_sync_log, Tablet_Extract_History, hcp_master_details)
+  - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History)
+  - UC5: Salesforce Integration & Sync Audit (hcp_master_details, Tablet_Extract_History)
 
 UI DASHBOARD displays data from PRIMARY TABLES:
   1. Leakage_Activity (60 rows) — Main leakage records table (UC1)
   2. fatigue_score (49 rows) — Fatigue scores table (fatigue range: 10-60) (UC2)
   3. leakage_history (13 rows) — Threshold update log (UC1)
   4. Compliance_Table (111 rows) — Govt plans bypassed KPI (UC1)
-  5. hcp_master_details — Main UC3/UC5 table (Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, sf_id, created_at, updated_at)
+  5. hcp_master_details (29 rows) — Main UC3/UC5 table (Prescriber_NPI, hcp_firstName, hcp_lastName, rep_id, status, work_detail, sf_id, created_at, updated_at)
   6. hcp_master_workdetails_history — UC3 audit trail history table (history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime)
-  7. Tablet_Extract_History — UC4 medicine extraction table (167 rows: id, Tablet_name, Dosage, Frequency, guidance, timestamp, Prescriber_NPI, sf_id, status, message)
-  8. Transcript_Extraction_History — UC4 transcript extraction log (id, hcp_detail_id, Prescriber_NPI, sf_id, transcript_text, tablet_names, status, created_at)
-  9. medicine_extraction_log — UC4 medicine extraction summary log (extraction_id, Prescriber_NPI, HCP_Name, extracted_drug, brand_name, generic_name, dosage, frequency, confidence_score)
-  10. salesforce_sync_log — UC5 Salesforce CRM sync status log (sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sf_record_id, sync_status, sync_message)
-  11. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
-  12. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
+  7. Tablet_Extract_History (170 rows) — UC4 medicine extraction table (id, Tablet_name, Dosage, Frequency, guidance, timestamp, Prescriber_NPI, sf_id, status, message)
+  8. Transcript_Extraction_History (48 rows) — UC4 transcript extraction log (id, hcp_detail_id, Prescriber_NPI, sf_id, transcript_text, tablet_names, status, created_at)
+  9. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
+  10. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
 
 RULES:
 - ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
 - NEVER invent table or column names. Use ONLY columns listed in the governance block.
 - For ALL claims and rejection queries, use `Leakage_Activity`.
-- For ALL medicine, tablet, drug extraction queries (UC4), use `Tablet_Extract_History` or `medicine_extraction_log` (joined with `hcp_master_details` on `Prescriber_NPI` to get HCP name: `CONCAT(hmd.hcp_firstName, ' ', hmd.hcp_lastName) AS HCP_Name`).
-- For Salesforce CRM sync/push queries (UC5), use `salesforce_sync_log` or `hcp_master_details` (sf_id, status, updated_at).
+- For ALL medicine, tablet, drug extraction queries (UC4), use `Tablet_Extract_History` or `Transcript_Extraction_History` (joined with `hcp_master_details` on `Prescriber_NPI` to get HCP name: `CONCAT(hmd.hcp_firstName, ' ', hmd.hcp_lastName) AS HCP_Name`).
+- For Salesforce CRM sync/push audit queries (UC5), use `hcp_master_details` (sf_id, status, updated_at) or `Tablet_Extract_History` (sf_id, status, message).
 - Use standard MySQL SQL syntax.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
@@ -136,6 +137,62 @@ class LLMService:
             raise RuntimeError(
                 "No LLM provider configured. Set GROQ_API_KEY or CLAUDE_API_KEY in backend/.env."
             )
+
+    def _generate_data_summary(self, user_message: str, result_data) -> str:
+        """Generate a natural language summary with an embedded markdown table directly from query results."""
+        rows = []
+        if isinstance(result_data, list):
+            rows = result_data
+        elif isinstance(result_data, dict):
+            if "records" in result_data and isinstance(result_data["records"], list):
+                rows = result_data["records"]
+            elif "data" in result_data and isinstance(result_data["data"], list):
+                rows = result_data["data"]
+            else:
+                rows = [result_data]
+
+        count = len(rows)
+
+        if count == 0:
+            return (
+                "🔍 No records found matching your criteria.\n\n"
+                "Try broadening your search or rephrasing the query."
+            )
+
+        summary_lines = [f"✅ Found **{count} record(s)** matching your request.\n"]
+
+        if rows and isinstance(rows[0], dict):
+            fields = list(rows[0].keys())
+            # Limit columns to top 8 for clean markdown rendering
+            displayed_fields = fields[:8]
+
+            # Markdown table header & separator
+            header_row = "| " + " | ".join(displayed_fields) + " |"
+            sep_row = "| " + " | ".join(["---"] * len(displayed_fields)) + " |"
+
+            summary_lines.append(header_row)
+            summary_lines.append(sep_row)
+
+            # Show top 8 rows directly inside Answer tab
+            max_rows = min(count, 8)
+            for i in range(max_rows):
+                r = rows[i]
+                vals = []
+                for f in displayed_fields:
+                    val = r.get(f)
+                    if val is None or str(val).strip() == "":
+                        val_str = "-"
+                    else:
+                        val_str = str(val).replace("\n", " ").replace("|", "\\|")
+                        if len(val_str) > 40:
+                            val_str = val_str[:37] + "..."
+                    vals.append(val_str)
+                summary_lines.append("| " + " | ".join(vals) + " |")
+
+            if count > max_rows:
+                summary_lines.append(f"\n_Showing top {max_rows} of {count} rows. Click the **Table View** tab above to explore the complete dataset._")
+
+        return "\n".join(summary_lines)
 
     async def get_schema_context(self) -> str:
         """Fetch MySQL schema overview directly."""
@@ -342,22 +399,18 @@ class LLMService:
                     f"If 0 records were returned, state politely that no records matched the criteria in the Salesforce org and suggest alternative terms."
                 )
 
-                try:
-                    final_answer = await self._call_groq_api(
-                        messages=[{"role": "user", "content": final_prompt}],
-                        temperature=0.3
-                    )
-                except Exception as e:
-                    logger.warning(f"Salesforce summarization call failed, defaulting: {e}")
-                    final_answer = "Query executed successfully."
+                final_answer = self._generate_data_summary(user_message, result_data if not isinstance(result_data, dict) else result_data)
 
                 sql_to_return = code
                 data_to_return = None
 
                 if isinstance(result_data, dict):
                     sql_to_return = result_data.get("soql") or result_data.get("sosl") or result_data.get("query") or code
-                    data_to_return = result_data.get("records") or result_data.get("data")
-                    if data_to_return is None:
+                    if "records" in result_data:
+                        data_to_return = result_data["records"]
+                    elif "data" in result_data:
+                        data_to_return = result_data["data"]
+                    else:
                         data_to_return = result_data
                 else:
                     data_to_return = result_data
@@ -446,21 +499,18 @@ class LLMService:
                     f"If 0 records were returned, state politely that no records matched the criteria in the Salesforce org and suggest alternative terms."
                 )
 
-                try:
-                    final_answer = await self._call_claude_api(
-                        messages=[{"role": "user", "content": final_prompt}],
-                    )
-                except Exception as e:
-                    logger.warning(f"Salesforce summarization call failed, defaulting: {e}")
-                    final_answer = "Query executed successfully."
+                final_answer = self._generate_data_summary(user_message, result_data)
 
                 sql_to_return = code
                 data_to_return = None
 
                 if isinstance(result_data, dict):
                     sql_to_return = result_data.get("soql") or result_data.get("sosl") or result_data.get("query") or code
-                    data_to_return = result_data.get("records") or result_data.get("data")
-                    if data_to_return is None:
+                    if "records" in result_data:
+                        data_to_return = result_data["records"]
+                    elif "data" in result_data:
+                        data_to_return = result_data["data"]
+                    else:
                         data_to_return = result_data
                 else:
                     data_to_return = result_data
@@ -521,7 +571,7 @@ class LLMService:
         context_prompt = (
             f"{SYSTEM_PROMPT}\n\n"
             f"{self._get_refinement_instructions()}\n\n"
-            f"{self.semantic_loader.get_semantic_context_prompt()}\n\n"
+            f"{self.semantic_loader.get_semantic_context_prompt_trimmed(user_message)}\n\n"
             f"{history_context}"
             f"CRITICAL REMINDER: You are currently operating in the MySQL database environment. You MUST generate Python code using `db.execute_sql()` to retrieve data from MySQL tables like `Tablet_Extract_History` or `medicine_extraction_log`. Do NOT mention Salesforce or SOQL.\n\n"
             f"User Question: {user_message}"
@@ -551,7 +601,9 @@ class LLMService:
             "  9. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
             "  10. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
             "CRITICAL RULES:\n"
-            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims.\n"
+            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims, Tablet_Extract_History, Transcript_Extraction_History, hcp_master_details, hcp_master_workdetails_history, rep_details, rep_master.\n"
+            "  - For ALL medicine, drug, and tablet extraction prompts (UC4), query `Tablet_Extract_History` or `Transcript_Extraction_History` (JOIN `hcp_master_details` ON `Prescriber_NPI` if physician name is requested).\n"
+            "  - For ALL Salesforce sync audit, status, and CRM push prompts (UC5), query `hcp_master_details` (sf_id, status, updated_at) or `Tablet_Extract_History` (sf_id, status, message).\n"
             "  - DO NOT USE copay_Claims_Transactions or Reverse_Claims for any claim or rejection queries. ALWAYS use Leakage_Activity (Pharmacy_Rejections, Total_Brand_Rejections) for all claims and rejection prompts.\n"
             "  - NEVER invent column names.\n"
             "  - For cross-table keyword search (e.g. 'Search for Endocrinology in the database', 'Look up Nancy everywhere', 'Find any record containing TX across all tables'), call Python code: `data = json.loads(db.search_records('search_term'))` and store `result = {'sql': 'CROSS_TABLE_SEARCH: search_term', 'records': data.get('records', [])}`.\n"
@@ -604,7 +656,7 @@ class LLMService:
         }
         
         models_to_try = [settings.GROQ_MODEL]
-        for fb in ["openai/gpt-oss-120b", "qwen/qwen3.6-27b"]:
+        for fb in ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"]:
             if fb not in models_to_try:
                 models_to_try.append(fb)
                 
@@ -632,8 +684,13 @@ class LLMService:
                         content = resp_json["choices"][0]["message"]["content"].strip()
                         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
                         return content
-                    elif resp.status_code in (400, 429):
-                        logger.warning(f"Groq API {resp.status_code} on {model_name} (json_mode={bool(fmt)}). Retrying fallback...")
+                    elif resp.status_code == 429:
+                        logger.warning(f"Groq API 429 Rate Limit on {model_name} (json_mode={bool(fmt)}). Waiting 2s before retry/fallback...")
+                        last_error = f"Groq API Error {resp.status_code}: {resp.text}"
+                        await asyncio.sleep(2.0)
+                        continue
+                    elif resp.status_code == 400:
+                        logger.warning(f"Groq API 400 on {model_name} (json_mode={bool(fmt)}). Retrying fallback...")
                         last_error = f"Groq API Error {resp.status_code}: {resp.text}"
                         continue
                     else:
@@ -725,22 +782,18 @@ class LLMService:
                     f"Provide a natural language summary of the results. Be clear and direct. If the user asks for a list, include the requested details in your response."
                 )
                 
-                try:
-                    final_answer = await self._call_groq_api(
-                        messages=[{"role": "user", "content": final_prompt}],
-                        temperature=0.2
-                    )
-                except Exception as e:
-                    logger.warning(f"Summarization call failed, defaulting: {e}")
-                    final_answer = "Query executed successfully."
+                final_answer = self._generate_data_summary(user_message, result_data)
 
                 sql_to_return = code
                 data_to_return = None
 
                 if isinstance(result_data, dict):
                     sql_to_return = result_data.get("sql") or result_data.get("query") or code
-                    data_to_return = result_data.get("records") or result_data.get("data")
-                    if data_to_return is None:
+                    if "records" in result_data:
+                        data_to_return = result_data["records"]
+                    elif "data" in result_data:
+                        data_to_return = result_data["data"]
+                    else:
                         data_to_return = result_data
                 else:
                     data_to_return = result_data
@@ -810,21 +863,18 @@ class LLMService:
                     f"Provide a natural language summary of the results. Be clear and direct. If the user asks for a list, include the requested details in your response."
                 )
 
-                try:
-                    final_answer = await self._call_claude_api(
-                        messages=[{"role": "user", "content": final_prompt}],
-                    )
-                except Exception as e:
-                    logger.warning(f"Summarization call failed, defaulting: {e}")
-                    final_answer = "Query executed successfully."
+                final_answer = self._generate_data_summary(user_message, result_data)
 
                 sql_to_return = code
                 data_to_return = None
 
                 if isinstance(result_data, dict):
                     sql_to_return = result_data.get("sql") or result_data.get("query") or code
-                    data_to_return = result_data.get("records") or result_data.get("data")
-                    if data_to_return is None:
+                    if "records" in result_data:
+                        data_to_return = result_data["records"]
+                    elif "data" in result_data:
+                        data_to_return = result_data["data"]
+                    else:
                         data_to_return = result_data
                 else:
                     data_to_return = result_data

@@ -94,6 +94,15 @@ class CodeExecutor:
         code = textwrap.dedent(code)
         code = code.strip()
 
+        # Remove accidental single-space leading indents on root-level statements
+        lines = code.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            if not line.startswith("    ") and not line.startswith("\t") and line.startswith(" "):
+                line = line.lstrip()
+            cleaned_lines.append(line)
+        code = "\n".join(cleaned_lines)
+
         # Handle escaped \n strings from JSON LLM responses
         if "\\n" in code:
             try:

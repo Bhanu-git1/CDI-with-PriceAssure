@@ -561,22 +561,44 @@
 
 .markdown-body table {
   width: 100%;
-  border-collapse: collapse;
-  margin: 0 0 10px 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 12px 0;
   font-size: 0.85rem;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
 }
 
 .markdown-body th,
 .markdown-body td {
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
   text-align: left;
 }
 
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  border-right: none;
+}
+
+.markdown-body tr:last-child td {
+  border-bottom: none;
+}
+
 .markdown-body th {
-  background: rgba(1, 118, 211, 0.04);
+  background: rgba(1, 118, 211, 0.08);
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--accent-primary);
+}
+
+.markdown-body tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+.markdown-body tr:hover {
+  background: rgba(1, 118, 211, 0.03);
 }
 
 .markdown-body hr {

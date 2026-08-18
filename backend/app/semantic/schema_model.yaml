@@ -430,6 +430,169 @@ semantic_model:
             - name: status
               type: string
 
+        # =====================================================
+        # UC3, UC4 & UC5 TABLES
+        # =====================================================
+        - name: hcp_master_details
+          description: "Main UC3/UC5 table storing HCP records, work details, rep assignment, and Salesforce ID."
+          columns:
+            - name: hcp_id
+              type: primary_key
+            - name: Prescriber_NPI
+              type: string
+            - name: hcp_firstName
+              type: string
+            - name: hcp_lastName
+              type: string
+            - name: rep_id
+              type: string
+            - name: status
+              type: string
+            - name: work_detail
+              type: text
+            - name: sf_id
+              type: string
+
+        - name: hcp_master_workdetails_history
+          description: "UC3 audit history trail table tracking updates to work details."
+          columns:
+            - name: history_id
+              type: primary_key
+            - name: hcp_id
+              type: string
+            - name: rep_id
+              type: string
+            - name: rep_firstName
+              type: string
+            - name: rep_lastName
+              type: string
+            - name: work_detail
+              type: text
+            - name: updated_datetime
+              type: timestamp
+
+        - name: Tablet_Extract_History
+          description: "UC4 medicine extraction table storing extracted drug, dosage, frequency, and clinical guidance."
+          columns:
+            - name: id
+              type: primary_key
+            - name: Tablet_name
+              type: string
+            - name: Dosage
+              type: string
+            - name: Frequency
+              type: string
+            - name: guidance
+              type: text
+            - name: timestamp
+              type: timestamp
+            - name: Prescriber_NPI
+              type: string
+            - name: sf_id
+              type: string
+            - name: status
+              type: string
+            - name: message
+              type: text
+
+        - name: Transcript_Extraction_History
+          description: "UC4 transcript extraction log storing original voice transcript text and extracted tablet names."
+          columns:
+            - name: id
+              type: primary_key
+            - name: hcp_detail_id
+              type: integer
+            - name: Prescriber_NPI
+              type: string
+            - name: sf_id
+              type: string
+            - name: transcript_text
+              type: text
+            - name: tablet_names
+              type: string
+            - name: status
+              type: string
+            - name: created_at
+              type: timestamp
+
+        - name: medicine_extraction_log
+          description: "UC4 medicine extraction summary log with confidence scores and HCP details."
+          columns:
+            - name: extraction_id
+              type: primary_key
+            - name: hcp_detail_id
+              type: integer
+            - name: Prescriber_NPI
+              type: string
+            - name: HCP_Name
+              type: string
+            - name: extracted_drug
+              type: string
+            - name: brand_name
+              type: string
+            - name: generic_name
+              type: string
+            - name: dosage
+              type: string
+            - name: frequency
+              type: string
+            - name: confidence_score
+              type: decimal
+            - name: extracted_at
+              type: timestamp
+
+        - name: salesforce_sync_log
+          description: "UC5 Salesforce CRM sync audit status log tracking sync status, Salesforce object/record ID, and messages."
+          columns:
+            - name: sync_id
+              type: primary_key
+            - name: hcp_detail_id
+              type: integer
+            - name: Prescriber_NPI
+              type: string
+            - name: HCP_Name
+              type: string
+            - name: sf_object_type
+              type: string
+            - name: sf_record_id
+              type: string
+            - name: sync_status
+              type: string
+            - name: sync_message
+              type: text
+            - name: synced_at
+              type: timestamp
+
+        - name: rep_details
+          description: "Sales representative directory."
+          columns:
+            - name: rep_id
+              type: primary_key
+            - name: rep_firstName
+              type: string
+            - name: rep_lastName
+              type: string
+            - name: email
+              type: string
+            - name: phone
+              type: string
+            - name: manager_id
+              type: string
+
+        - name: rep_master
+          description: "Sales manager directory."
+          columns:
+            - name: rep_id
+              type: primary_key
+            - name: rep_firstName
+              type: string
+            - name: rep_lastName
+              type: string
+            - name: email
+              type: string
+            - name: phone
+              type: string
+
   # ============================================================
   # VERIFIED JOIN PATHS (Only joins confirmed to return data)
   # ============================================================
@@ -616,3 +779,25 @@ semantic_model:
     - name: campaign_budget_by_channel
       description: "Campaign budget allocation by channel"
       sql: "SELECT channel, COUNT(*) as campaign_count, SUM(budget_amount) as total_budget, AVG(budget_amount) as avg_budget FROM campaign_master GROUP BY channel ORDER BY total_budget DESC"
+
+    # --- UC4: Clinical Medicine Extraction ---
+    - name: extracted_medicines_summary
+      description: "All extracted medicine logs with HCP names, drug brand/generic, dosage, and frequency"
+      sql: "SELECT HCP_Name, extracted_drug, brand_name, generic_name, dosage, frequency, confidence_score, extracted_at FROM medicine_extraction_log ORDER BY extracted_at DESC"
+
+    - name: tablet_extraction_history_list
+      description: "Tablet extraction history including tablet names, dosages, frequencies, and clinical guidance"
+      sql: "SELECT Tablet_name, Dosage, Frequency, guidance, Prescriber_NPI, sf_id, status, message, timestamp FROM Tablet_Extract_History ORDER BY timestamp DESC"
+
+    - name: transcript_extraction_history_list
+      description: "Voice transcript extraction history and extracted tablet names"
+      sql: "SELECT hcp_detail_id, Prescriber_NPI, sf_id, transcript_text, tablet_names, status, created_at FROM Transcript_Extraction_History ORDER BY created_at DESC"
+
+    # --- UC5: Salesforce Integration & Sync Audit ---
+    - name: salesforce_sync_audit_log
+      description: "Salesforce CRM sync audit status log for all HCP records"
+      sql: "SELECT sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sf_record_id, sync_status, sync_message, synced_at FROM salesforce_sync_log ORDER BY synced_at DESC"
+
+    - name: pending_salesforce_sync_records
+      description: "HCP records pending or failed in Salesforce CRM sync"
+      sql: "SELECT sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sync_status, sync_message FROM salesforce_sync_log WHERE sync_status != 'Synced'"
