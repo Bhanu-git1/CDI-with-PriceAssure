@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     CLAUDE_API_KEY: Optional[str] = None
     CLAUDE_MODEL: str = "claude-opus-5"
 
+    # AWS Bedrock (Claude via Bedrock instead of direct Anthropic API)
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_REGION: str = "ap-south-1"
+    BEDROCK_CLAUDE_MODEL: str = "global.anthropic.claude-opus-5"
+
     # Salesforce Connection Settings (UC3)
     SF_USERNAME: str = ""
     SF_PASSWORD: str = ""
@@ -37,6 +43,7 @@ class Settings(BaseSettings):
         "MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE",
         "GROQ_API_KEY", "GROQ_MODEL", "CLAUDE_API_KEY", "CLAUDE_MODEL", "HOST",
         "SF_USERNAME", "SF_PASSWORD", "SF_SECURITY_TOKEN", "SF_DOMAIN", "SF_SESSION_ID", "SF_INSTANCE_URL",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "BEDROCK_CLAUDE_MODEL",
         mode="before"
     )
     @classmethod

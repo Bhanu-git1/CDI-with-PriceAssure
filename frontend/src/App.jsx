@@ -170,13 +170,13 @@ export default function App() {
               <line x1="9" y1="4" x2="9" y2="20" />
             </svg>
           </button>
-          <img src={logoMain} alt="Pharma AI Agent" className="sidebar-brand-logo" />
+          <img src={logoMain} alt="SRM Commercial Decision Intelligence Platform" className="sidebar-brand-logo" />
         </div>
 
         <div className="sidebar-scroll">
           {/* Backend System Connections */}
           <div className="sidebar-section">
-            <h4 className="sidebar-section-title">Backend Connections</h4>
+            <h4 className="sidebar-section-title">Connected System Status</h4>
 
             <div className="connection-row">
               <span className="connection-dot" style={{ backgroundColor: statusColor, boxShadow: `0 0 6px ${statusColor}` }} />
@@ -198,7 +198,7 @@ export default function App() {
 
           {/* AI Model */}
           <div className="sidebar-section">
-            <h4 className="sidebar-section-title">AI Model</h4>
+            <h4 className="sidebar-section-title">Connected AI Model</h4>
             <div className="connection-row" title={activeModel || ''}>
               <span className="connection-dot" style={{ backgroundColor: llmColor, boxShadow: `0 0 6px ${llmColor}` }} />
               <span className="connection-name">{activeModel || 'Detecting...'}</span>
@@ -240,10 +240,9 @@ export default function App() {
               <div className="empty-state-icon">
                 <img src={logoMain} alt="" />
               </div>
-              <h3>Pharma Command Center 🏥</h3>
-              <p className="empty-state-tagline">Pharma AI Agent</p>
+              <h3>Commercial Decision Intelligence Platform</h3>
               <p>
-                Ask questions about Leakage Signals (UC1) and Journey Orchestration & HCP Fatigue (UC2). The AI will translate your questions into governed SQL and display real-time analytics!
+                AI-powered platform that unifies commercial data, analytics, business rules, and processes to help Commercial teams make faster, smarter decisions.
               </p>
 
               <div style={{ width: '100%', marginTop: '24px' }}>

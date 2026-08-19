@@ -129,13 +129,29 @@ class LLMService:
         if settings.GROQ_API_KEY:
             self.provider = "groq"
             logger.info(f"Initializing Groq client with model {settings.GROQ_MODEL} for DCE...")
+        elif settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+            self.provider = "claude"
+            self.is_bedrock = True
+            self.claude_model = settings.BEDROCK_CLAUDE_MODEL
+            logger.info(
+                f"Initializing Claude client via AWS Bedrock (model={self.claude_model}, "
+                f"region={settings.AWS_REGION}) for DCE..."
+            )
+            self.claude_client = anthropic.AsyncAnthropicBedrock(
+                aws_access_key=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_key=settings.AWS_SECRET_ACCESS_KEY,
+                aws_region=settings.AWS_REGION,
+            )
         elif settings.CLAUDE_API_KEY:
             self.provider = "claude"
-            logger.info(f"Initializing Claude client with model {settings.CLAUDE_MODEL} for DCE...")
+            self.is_bedrock = False
+            self.claude_model = settings.CLAUDE_MODEL
+            logger.info(f"Initializing Claude client with model {self.claude_model} for DCE...")
             self.claude_client = anthropic.AsyncAnthropic(api_key=settings.CLAUDE_API_KEY)
         else:
             raise RuntimeError(
-                "No LLM provider configured. Set GROQ_API_KEY or CLAUDE_API_KEY in backend/.env."
+                "No LLM provider configured. Set GROQ_API_KEY, AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY "
+                "(Bedrock), or CLAUDE_API_KEY in backend/.env."
             )
 
     def _generate_data_summary(self, user_message: str, result_data) -> str:
@@ -220,7 +236,16 @@ class LLMService:
                     return {"status": "connected", "detail": None}
                 return {"status": "offline", "detail": f"Groq API returned HTTP {resp.status_code}"}
             elif self.provider == "claude":
-                await self.claude_client.models.retrieve(settings.CLAUDE_MODEL)
+                if self.is_bedrock:
+                    # Bedrock has no metadata/models endpoint; a minimal 1-token
+                    # completion is the cheapest available liveness probe.
+                    await self.claude_client.messages.create(
+                        model=self.claude_model,
+                        max_tokens=1,
+                        messages=[{"role": "user", "content": "ping"}],
+                    )
+                else:
+                    await self.claude_client.models.retrieve(self.claude_model)
                 return {"status": "connected", "detail": None}
             else:
                 return {"status": "offline", "detail": "No LLM provider configured"}
@@ -699,10 +724,10 @@ class LLMService:
         raise RuntimeError(last_error or "Groq API request failed across all models.")
 
     async def _call_claude_api(self, messages: list) -> str:
-        """Call the Claude (Anthropic) Messages API and return the response text."""
-        logger.info(f"Calling Claude API ({settings.CLAUDE_MODEL})...")
+        """Call the Claude Messages API (direct Anthropic or AWS Bedrock) and return the response text."""
+        logger.info(f"Calling Claude API ({self.claude_model}, bedrock={self.is_bedrock})...")
         response = await self.claude_client.messages.create(
-            model=settings.CLAUDE_MODEL,
+            model=self.claude_model,
             max_tokens=4096,
             messages=messages,
         )

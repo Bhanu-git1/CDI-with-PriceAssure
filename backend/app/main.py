@@ -87,10 +87,11 @@ class ChatRequest(BaseModel):
 @app.get("/api")
 @app.get("/")
 async def read_root():
-    if settings.GROQ_API_KEY:
+    if llm_service.provider == "groq":
         provider = f"Groq ({settings.GROQ_MODEL})"
-    elif settings.CLAUDE_API_KEY:
-        provider = f"Claude ({settings.CLAUDE_MODEL})"
+    elif llm_service.provider == "claude":
+        backend_label = "Bedrock" if llm_service.is_bedrock else "Anthropic"
+        provider = f"Claude via {backend_label} ({llm_service.claude_model})"
     else:
         provider = "Not configured"
 
