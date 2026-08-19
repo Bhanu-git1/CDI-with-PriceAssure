@@ -179,8 +179,30 @@ class LLMService:
 
         if rows and isinstance(rows[0], dict):
             fields = list(rows[0].keys())
-            # Limit columns to top 8 for clean markdown rendering
-            displayed_fields = fields[:8]
+
+            # Prioritize key business fields (Email, Phone, Name, License, State, Specialty, Status) over technical IDs
+            def field_priority(f: str) -> int:
+                f_lower = f.lower()
+                if f_lower in ("id", "id__c") or f_lower.endswith(".id") or "createdby" in f_lower or "modstamp" in f_lower or "system" in f_lower:
+                    return 100
+                if "email" in f_lower:
+                    return 1
+                if "phone" in f_lower or "mobile" in f_lower:
+                    return 2
+                if "name" in f_lower:
+                    return 3
+                if "license" in f_lower:
+                    return 4
+                if "state" in f_lower:
+                    return 5
+                if "special" in f_lower:
+                    return 6
+                if "status" in f_lower:
+                    return 7
+                return 10
+
+            sorted_fields = sorted(fields, key=field_priority)
+            displayed_fields = sorted_fields[:10]
 
             # Markdown table header & separator
             header_row = "| " + " | ".join(displayed_fields) + " |"
@@ -304,18 +326,18 @@ class LLMService:
             "  5. For search, you MUST set: result = {'sosl': '<search_query>', 'records': <flat_records_list_retrieved>}\n"
             "  6. Global scope already has 'sf', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
             "  7. Standard imports for allowed modules are permitted.\n"
-            "  8. Preferred objects are Doctor__c, Rep_Details__c, and Rep_Manager__c.\n"
-            "  9. ALWAYS include 'Status__c' in the SELECT clause when querying Doctor__c records (e.g. SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c ...).\n"
+            "  8. Preferred objects are Doctor__c and Rep_Details__c. DO NOT query or include Manager fields (`Rep_Manager__r`, `Rep_Manager__c`) in any Salesforce queries because manager data is unpopulated.\n"
+            "  9. ALWAYS include Doctor Phone (`Phone__c`), State License (`State_License__c`), and Representative details (`Rep_Ids__r.First_Name__c`, `Rep_Ids__r.Last_Name__c`, `Rep_Ids__r.Email__c`, `Rep_Ids__r.Phone_Number__c`) in the SELECT clause when querying Doctor__c records so contact details and email addresses are always returned.\n"
             "  10. FLEXIBLE SEARCHING: Use LIKE operators (e.g. Speciality__c LIKE '%cardiology%', HCP_First_Name__c LIKE '%John%', Practice_State__c LIKE '%TX%') for string searches to match partial or case-insensitive user inputs.\n"
             "  11. PICKLIST & STATE MAP:\n"
             "      - For Doctor__c.Status__c: Map 'in progress', 'progress', 'wip', 'ongoing' -> Status__c = 'In-Progress'. Map 'completed', 'complete', 'done', 'finished' -> Status__c = 'Completed'.\n"
-            "      - For Practice_State__c: Support full state names and postal codes (e.g., 'California' -> Practice_State__c LIKE '%CA%' OR Practice_State__c LIKE '%California%').\n"
+            "      - For Practice_State__c & State_License__c: Support full state names and postal codes (e.g. State_License__c LIKE '%California%' OR State_License__c LIKE '%CA%' OR Practice_State__c LIKE '%CA%').\n"
             "  12. GREETINGS & SCHEMA QUESTIONS:\n"
-            "      - If the user prompt is a greeting (e.g. 'hello', 'hi', 'hey', 'help'), set code = null and provide a helpful, welcoming natural language answer in the 'answer' field explaining available data (Doctors, Sales Reps, Managers) with example prompts.\n"
+            "      - If the user prompt is a greeting (e.g. 'hello', 'hi', 'hey', 'help'), set code = null and provide a helpful, welcoming natural language answer in the 'answer' field explaining available data (Doctors, Sales Reps) with example prompts.\n"
             "      - If the user asks about available tables or schema ('what objects are in Salesforce?', 'describe Doctor__c object'), provide the schema info in 'answer' or run sf.describe_object('Doctor__c') / sf.list_objects().\n\n"
-            "Example of querying Doctors:\n"
-            "data = json.loads(sf.execute_soql(\"SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c WHERE Status__c = 'In-Progress'\"))\n"
-            "result = {\"soql\": \"SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c WHERE Status__c = 'In-Progress'\", \"records\": data.get(\"records\", [])}\n\n"
+            "Example of querying Doctors with Rep Email & Contact Info:\n"
+            "data = json.loads(sf.execute_soql(\"SELECT HCP_First_Name__c, HCP_Last_Name__c, Phone__c, State_License__c, Speciality__c, Practice_State__c, Status__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c WHERE Status__c = 'In-Progress'\"))\n"
+            "result = {\"soql\": \"SELECT HCP_First_Name__c, HCP_Last_Name__c, Phone__c, State_License__c, Speciality__c, Practice_State__c, Status__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c WHERE Status__c = 'In-Progress'\", \"records\": data.get(\"records\", [])}\n\n"
             "Format your output ONLY as a valid JSON object with these keys:\n"
             "{\n"
             "  \"reasoning\": \"your reasoning/steps\",\n"
@@ -340,10 +362,10 @@ class LLMService:
             f"SALESFORCE SCHEMA DETAILS:\n{schema_context}\n\n"
             f"{history_context}"
             "CRITICAL REMINDER FOR THIS ORG:\n"
-            "- Query custom objects 'Doctor__c', 'Rep_Details__c', or 'Rep_Manager__c'.\n"
+            "- Query custom objects 'Doctor__c' and 'Rep_Details__c'.\n"
             "- Filter HCPs / Doctors using fields like HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c.\n"
             "- Use relationship 'Rep_Ids__r' on Doctor__c to get Sales Representative fields.\n"
-            "- Use relationship 'Rep_Manager__r' on Rep_Details__c to get Manager fields.\n\n"
+            "- DO NOT query or include Manager objects or relationship fields ('Rep_Manager__c', 'Rep_Manager__r') as manager data is unpopulated.\n\n"
             f"User Question: {user_message}"
         )
 

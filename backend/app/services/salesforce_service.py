@@ -7,6 +7,44 @@ from simple_salesforce import Salesforce, SalesforceAuthenticationFailed
 
 logger = logging.getLogger("salesforce-service")
 
+KEY_LABEL_MAP = {
+    "HCP_First_Name__c": "HCP First Name",
+    "HCP_Last_Name__c": "HCP Last Name",
+    "Phone__c": "HCP Phone",
+    "State_License__c": "State License",
+    "Practice_State__c": "Practice State",
+    "Speciality__c": "Specialty",
+    "Specialty__c": "Specialty",
+    "Status__c": "Status",
+    "Work_Details__c": "Work Details",
+    "Rep_ID__c": "Rep ID",
+    "Rep_Ids__r.Rep_Id__c": "Rep ID",
+    "Rep_Ids__r.First_Name__c": "Rep First Name",
+    "Rep_Ids__r.Last_Name__c": "Rep Last Name",
+    "Rep_Ids__r.Email__c": "Rep Email",
+    "Rep_Ids__r.Phone_Number__c": "Rep Phone",
+    "First_Name__c": "First Name",
+    "Last_Name__c": "Last Name",
+    "Email__c": "Email",
+    "Phone_Number__c": "Phone",
+}
+
+COLUMN_ORDER = [
+    "HCP First Name",
+    "HCP Last Name",
+    "HCP Phone",
+    "Specialty",
+    "State License",
+    "Practice State",
+    "Status",
+    "Work Details",
+    "Rep First Name",
+    "Rep Last Name",
+    "Rep Email",
+    "Rep Phone",
+    "Rep ID"
+]
+
 def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
     """Recursively flatten nested dictionary keys using dot notation, skipping Salesforce metadata 'attributes'."""
     items = []
@@ -19,6 +57,28 @@ def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dic
         else:
             items.append((new_key, v))
     return dict(items)
+
+def format_clean_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert raw Salesforce API field names to clean human-readable column headers in preferred order."""
+    flat = flatten_dict(record)
+    cleaned = {}
+    for k, v in flat.items():
+        if k in KEY_LABEL_MAP:
+            label = KEY_LABEL_MAP[k]
+        else:
+            label = re.sub(r'^[a-zA-Z0-9_]+\.', '', k)
+            label = re.sub(r'__c$', '', label)
+            label = label.replace('_', ' ').strip()
+        cleaned[label] = v
+
+    ordered = {}
+    for preferred in COLUMN_ORDER:
+        if preferred in cleaned:
+            ordered[preferred] = cleaned.pop(preferred)
+    for remaining_k, remaining_v in cleaned.items():
+        ordered[remaining_k] = remaining_v
+
+    return ordered
 
 class SalesforceService:
     """
@@ -194,7 +254,7 @@ class SalesforceService:
 
             cleaned_records = []
             for record in records:
-                cleaned_records.append(flatten_dict(record))
+                cleaned_records.append(format_clean_record(record))
 
             output = {
                 "totalSize": total_size,
@@ -222,7 +282,7 @@ class SalesforceService:
             grouped = {}
             for record in search_records_list:
                 obj_type = record.get("attributes", {}).get("type", "Unknown")
-                clean = flatten_dict(record)
+                clean = format_clean_record(record)
                 if obj_type not in grouped:
                     grouped[obj_type] = []
                 grouped[obj_type].append(clean)

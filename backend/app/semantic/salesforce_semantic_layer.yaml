@@ -86,39 +86,35 @@ objects:
         label: "Phone Number"
         type: "phone"
         description: "Contact phone number of the Sales Representative."
-      Rep_Manager__c:
-        label: "Sales Manager Relationship"
-        type: "reference"
-        reference_to: "Rep_Manager__c"
-        relationship_name: "Rep_Manager__r"
-        description: "Lookup or Master-Detail reference linking Sales Rep to Rep_Manager__c."
-
-  Rep_Manager__c:
-    label: "Sales Representative Manager"
-    description: "Contains Sales Manager details supervising Sales Representatives."
+  Rep_Details__c:
+    label: "Sales Representative Details"
+    aliases:
+      - "Rep_Detials__c"
+      - "HCP_Rep_Detail__c"
+    description: "Contains Sales Representative details assigned to manage HCP/Doctor relationships."
     primary_key: "Id"
-    custom_id_field: "Rep_Manager_Id__c"
+    custom_id_field: "Rep_Id__c"
     fields:
-      Rep_Manager_Id__c:
-        label: "Manager ID"
+      Rep_Id__c:
+        label: "Rep ID"
         type: "string"
-        description: "Unique identifier for the Sales Manager."
+        description: "Unique identifier for the Sales Representative."
       First_Name__c:
         label: "First Name"
         type: "string"
-        description: "First name of the Sales Manager."
+        description: "First name of the Sales Representative."
       Last_Name__c:
         label: "Last Name"
         type: "string"
-        description: "Last name of the Sales Manager."
+        description: "Last name of the Sales Representative."
       Email__c:
         label: "Email"
         type: "email"
-        description: "Email address of the Sales Manager."
+        description: "Email address of the Sales Representative."
       Phone_Number__c:
         label: "Phone Number"
         type: "phone"
-        description: "Phone number of the Sales Manager."
+        description: "Contact phone number of the Sales Representative."
 
 relationships:
   - name: "Doctor_to_Rep"
@@ -129,22 +125,13 @@ relationships:
     relationship_name: "Rep_Ids__r"
     description: "Doctor record references Sales Representative details."
 
-  - name: "Rep_to_Manager"
-    from_object: "Rep_Details__c"
-    to_object: "Rep_Manager__c"
-    type: "Lookup"
-    foreign_key: "Rep_Manager__c"
-    relationship_name: "Rep_Manager__r"
-    description: "Sales Representative record references Sales Manager details."
-
 sample_queries:
   - question: "List all In-Progress doctors with their speciality and state"
     soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c WHERE Status__c = 'In-Progress'"
   - question: "List all Completed doctors with their speciality and state"
     soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Practice_State__c, Status__c FROM Doctor__c WHERE Status__c = 'Completed'"
-  - question: "Show sales representatives along with their assigned manager"
-    soql: "SELECT First_Name__c, Last_Name__c, Email__c, Rep_Manager__r.First_Name__c, Rep_Manager__r.Last_Name__c FROM Rep_Details__c"
+  - question: "Show sales representatives along with their email and phone"
+    soql: "SELECT First_Name__c, Last_Name__c, Email__c, Phone_Number__c FROM Rep_Details__c"
   - question: "Find doctors and their assigned sales representative details"
-    soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c FROM Doctor__c"
-  - question: "List all Sales Managers and their contact emails"
-    soql: "SELECT First_Name__c, Last_Name__c, Email__c, Phone_Number__c FROM Rep_Manager__c"
+    soql: "SELECT HCP_First_Name__c, HCP_Last_Name__c, Speciality__c, Phone__c, State_License__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c"
+
