@@ -124,7 +124,7 @@ semantic_model:
           description: >
             PRIMARY UI TABLE — Count displayed on KPI card (Govt. Plans Bypassed).
             Stores Medicaid/Medicare rejected claims excluded during compliance filtering.
-            111 rows. Payer types: Medicaid, Medicare.
+            111 rows. Payer types: Medicaid , Medicare.
           columns:
             - name: id
               type: primary_key

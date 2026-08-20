@@ -94,7 +94,7 @@ The database powers a Pharma Commercial Command Centre with 5 integrated Use Cas
   - UC2: Journey Orchestration & HCP Fatigue (fatigue_score, hcp_engagement_logs, campaign_master)
   - UC3: Voice Work Detail Manager & HCP Interaction Recording (hcp_master_details, hcp_master_workdetails_history, rep_details)
   - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History, medicine_extraction_log)
-  - UC5: Salesforce Integration & Sync Audit (salesforce_sync_log, Tablet_Extract_History, hcp_master_details)
+  - UC5: Salesforce Integration & Sync Audit (salesforce_sync_log , Tablet_Extract_History, hcp_master_details)
 
 UI DASHBOARD displays data from PRIMARY TABLES:
   1. Leakage_Activity (60 rows) — Main leakage records table (UC1)
