@@ -105,16 +105,118 @@ export default function App() {
     }
   };
 
-  const handleSelectChat = (session) => {
+  const handleSelectChat = async (session) => {
     if (editingChatId === session.id) return;
     setCurrentChatId(session.id);
-    setMessages(session.messages || []);
+
+    // If messages are already present in memory, load them directly
+    if (session.messages && session.messages.length > 0) {
+      setMessages(session.messages);
+    } else {
+      setMessages([]);
+      setQueryLoading(true);
+      try {
+        const res = await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(session.id)}`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (res.ok) {
+          const fullSession = await res.json();
+          const loadedMessages = fullSession.messages || [];
+          setMessages(loadedMessages);
+          setChatHistory((prev) =>
+            prev.map((c) => (c.id === session.id ? { ...c, messages: loadedMessages } : c))
+          );
+        }
+      } catch (err) {
+        console.error("Failed to load chat details from backend:", err);
+      } finally {
+        setQueryLoading(false);
+      }
+    }
+
     if (inputRef.current) {
       inputRef.current.focus();
     }
   };
 
-  const handleDeleteChat = (id, e) => {
+  const saveSessionToBackend = async (chatId, title, messagesToSave, isPinned = false) => {
+    try {
+      await fetch(`${apiEndpoint}/api/chats`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({
+          id: chatId,
+          title: title,
+          isPinned: !!isPinned,
+          user_id: currentUser || 'default_user',
+          messages: messagesToSave
+        })
+      });
+    } catch (e) {
+      console.warn("Failed to persist chat session to backend:", e);
+    }
+  };
+
+  const syncLocalToBackend = async (sessions) => {
+    try {
+      const res = await fetch(`${apiEndpoint}/api/chats/sync-local`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({
+          user_id: currentUser || 'default_user',
+          sessions: sessions
+        })
+      });
+      if (res.ok) {
+        const listRes = await fetch(
+          `${apiEndpoint}/api/chats?user_id=${encodeURIComponent(currentUser || 'default_user')}&limit=1000`,
+          { headers: { 'ngrok-skip-browser-warning': 'true' } }
+        );
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          if (listData.sessions) setChatHistory(listData.sessions);
+        }
+      }
+    } catch (e) {
+      console.warn("Local history sync skipped:", e);
+    }
+  };
+
+  const fetchChatsFromBackend = async () => {
+    try {
+      const userParam = encodeURIComponent(currentUser || 'default_user');
+      const res = await fetch(`${apiEndpoint}/api/chats?user_id=${userParam}&limit=1000`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.sessions && Array.isArray(data.sessions)) {
+          if (data.sessions.length > 0) {
+            setChatHistory(data.sessions);
+            try {
+              localStorage.setItem('__dce_chat_history__', JSON.stringify(data.sessions));
+            } catch (e) {}
+          } else {
+            // First time sync from local storage if local has saved chats
+            const localSaved = loadSavedSessions();
+            if (localSaved.length > 0) {
+              await syncLocalToBackend(localSaved);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Backend chat history fetch fallback to local cache:", err);
+    }
+  };
+
+  const handleDeleteChat = async (id, e) => {
     if (e) e.stopPropagation();
     setChatHistory((prev) => {
       const updated = prev.filter((c) => c.id !== id);
@@ -132,6 +234,15 @@ export default function App() {
     }
     setContextMenu({ open: false, x: 0, y: 0, session: null });
     showToast("Chat deleted");
+
+    try {
+      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+    } catch (err) {
+      console.error("Failed to delete chat on backend:", err);
+    }
   };
 
   const handleOpenContextMenu = (e, session) => {
@@ -168,13 +279,14 @@ export default function App() {
     setContextMenu({ open: false, x: 0, y: 0, session: null });
   };
 
-  const handleSaveRename = (id) => {
-    if (!editingTitle.trim()) {
+  const handleSaveRename = async (id) => {
+    const trimmed = editingTitle.trim();
+    if (!trimmed) {
       setEditingChatId(null);
       return;
     }
     setChatHistory((prev) => {
-      const updated = prev.map((c) => (c.id === id ? { ...c, title: editingTitle.trim() } : c));
+      const updated = prev.map((c) => (c.id === id ? { ...c, title: trimmed } : c));
       try {
         localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
         localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
@@ -185,9 +297,22 @@ export default function App() {
     });
     setEditingChatId(null);
     showToast("Chat renamed");
+
+    try {
+      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({ title: trimmed })
+      });
+    } catch (err) {
+      console.error("Failed to rename chat on backend:", err);
+    }
   };
 
-  const handleTogglePin = (session) => {
+  const handleTogglePin = async (session) => {
     if (!session) return;
     const isNowPinned = !session.isPinned;
     setChatHistory((prev) => {
@@ -202,9 +327,22 @@ export default function App() {
     });
     setContextMenu({ open: false, x: 0, y: 0, session: null });
     showToast(isNowPinned ? "Chat pinned to top" : "Chat unpinned");
+
+    try {
+      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(session.id)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({ isPinned: isNowPinned })
+      });
+    } catch (err) {
+      console.error("Failed to update pin on backend:", err);
+    }
   };
 
-  const handleArchive = (session) => {
+  const handleArchive = async (session) => {
     if (!session) return;
     setChatHistory((prev) => {
       const updated = prev.filter((c) => c.id !== session.id);
@@ -222,6 +360,15 @@ export default function App() {
     }
     setContextMenu({ open: false, x: 0, y: 0, session: null });
     showToast("Chat archived");
+
+    try {
+      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(session.id)}`, {
+        method: 'DELETE',
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+    } catch (err) {
+      console.error("Failed to archive chat on backend:", err);
+    }
   };
 
   const groupChatsByDate = (items) => {
@@ -266,9 +413,7 @@ export default function App() {
     return groups;
   };
 
-  // Live backend/connection/LLM status check. Only shows the transient
-  // "connecting" state on the very first load — background polls update
-  // straight to the resolved status so the UI doesn't flicker every cycle.
+  // Live backend/connection/LLM status check.
   const checkStatus = async (isInitial = false) => {
     if (isInitial) {
       setServerStatus('connecting');
@@ -297,13 +442,13 @@ export default function App() {
     }
   };
 
-  // Check immediately on load, then keep polling in the background so
-  // status reflects reality live, without requiring a page refresh.
+  // Check immediately on load and fetch chats from MySQL backend
   useEffect(() => {
     checkStatus(true);
+    fetchChatsFromBackend();
     const interval = setInterval(() => checkStatus(false), STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentUser]);
 
   const handleSendMessage = async (textToSend) => {
     const queryText = textToSend || inputValue;
@@ -316,11 +461,14 @@ export default function App() {
       setCurrentChatId(chatId);
     }
 
-    const userMsg = { sender: 'user', text: queryText };
+    const userMsg = { sender: 'user', text: queryText, timestamp: new Date().toISOString() };
     const updatedMessagesWithUser = [...messages, userMsg];
     setMessages(updatedMessagesWithUser);
     setInputValue('');
     setQueryLoading(true);
+
+    let sessionTitle = queryText;
+    let isPinnedState = false;
 
     // Save/update the session in chat history with user message
     setChatHistory((prev) => {
@@ -328,6 +476,8 @@ export default function App() {
       let updated;
       const timestamp = new Date().toISOString();
       if (existing) {
+        sessionTitle = existing.title;
+        isPinnedState = existing.isPinned;
         const updatedChat = {
           ...existing,
           messages: updatedMessagesWithUser,
@@ -339,9 +489,10 @@ export default function App() {
           id: chatId,
           title: queryText,
           messages: updatedMessagesWithUser,
-          timestamp
+          timestamp,
+          isPinned: false
         };
-        updated = [newChat, ...prev].slice(0, 50);
+        updated = [newChat, ...prev];
       }
       try {
         localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
@@ -351,6 +502,9 @@ export default function App() {
       }
       return updated;
     });
+
+    // Save immediately to backend database
+    saveSessionToBackend(chatId, sessionTitle, updatedMessagesWithUser, isPinnedState);
 
     try {
       const requestBody = {
@@ -380,7 +534,8 @@ export default function App() {
         sql: result.sql,
         data: result.data,
         error: result.error,
-        source: result.source
+        source: result.source,
+        timestamp: new Date().toISOString()
       };
 
       const finalMessages = [...updatedMessagesWithUser, assistantMsg];
@@ -407,12 +562,16 @@ export default function App() {
         return updated;
       });
 
+      // Save complete transcript to backend database
+      saveSessionToBackend(chatId, sessionTitle, finalMessages, isPinnedState);
+
     } catch (error) {
       console.error("Chat Error:", error);
       const errorMsg = {
         sender: 'assistant',
         text: "Could not retrieve database data.",
-        error: error.message
+        error: error.message,
+        timestamp: new Date().toISOString()
       };
       const finalMessages = [...updatedMessagesWithUser, errorMsg];
       setMessages(finalMessages);
@@ -436,6 +595,8 @@ export default function App() {
         }
         return updated;
       });
+
+      saveSessionToBackend(chatId, sessionTitle, finalMessages, isPinnedState);
     } finally {
       setQueryLoading(false);
     }
