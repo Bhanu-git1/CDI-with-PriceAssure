@@ -690,6 +690,47 @@
   background: rgba(1, 118, 211, 0.12);
 }
 
+/* Grayout & Loading states for chat sessions */
+.history-count-badge.grayout {
+  background: var(--text-muted);
+  opacity: 0.7;
+}
+
+.history-loading-placeholder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.history-prompt-item.grayout,
+.history-prompt-item.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+  cursor: not-allowed !important;
+  user-select: none;
+}
+
+.history-prompt-text.grayout-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.history-spinner-icon {
+  animation: historySpin 1s linear infinite;
+  color: var(--brand-primary);
+  flex-shrink: 0;
+}
+
+@keyframes historySpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Floating Chat Context Menu — matching screenshot */
 .chat-context-menu {
   position: fixed;

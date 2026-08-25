@@ -54,6 +54,8 @@ export default function App() {
   const [promptHistoryOpen, setPromptHistoryOpen] = useState(true);
   const [currentChatId, setCurrentChatId] = useState(null);
   const [chatHistory, setChatHistory] = useState(loadSavedSessions);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [selectingChatId, setSelectingChatId] = useState(null);
   const [thinkMode, setThinkMode] = useState(false);
   const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, session: null });
   const [editingChatId, setEditingChatId] = useState(null);
@@ -106,7 +108,7 @@ export default function App() {
   };
 
   const handleSelectChat = async (session) => {
-    if (editingChatId === session.id) return;
+    if (historyLoading || selectingChatId || editingChatId === session.id) return;
     setCurrentChatId(session.id);
 
     // If messages are already present in memory, load them directly
@@ -114,6 +116,7 @@ export default function App() {
       setMessages(session.messages);
     } else {
       setMessages([]);
+      setSelectingChatId(session.id);
       setQueryLoading(true);
       try {
         const res = await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(session.id)}`, {
@@ -131,6 +134,7 @@ export default function App() {
         console.error("Failed to load chat details from backend:", err);
       } finally {
         setQueryLoading(false);
+        setSelectingChatId(null);
       }
     }
 
@@ -189,6 +193,7 @@ export default function App() {
   };
 
   const fetchChatsFromBackend = async () => {
+    setHistoryLoading(true);
     try {
       const userParam = encodeURIComponent(currentUser || 'default_user');
       const res = await fetch(`${apiEndpoint}/api/chats?user_id=${userParam}&limit=1000`, {
@@ -213,6 +218,8 @@ export default function App() {
       }
     } catch (err) {
       console.warn("Backend chat history fetch fallback to local cache:", err);
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -760,7 +767,9 @@ export default function App() {
                 >
                   <div className="sidebar-title-with-badge">
                     <h4 className="sidebar-section-title">Chats History</h4>
-                    {chatHistory.length > 0 && (
+                    {historyLoading ? (
+                      <span className="history-count-badge grayout">Loading...</span>
+                    ) : chatHistory.length > 0 && (
                       <span className="history-count-badge">{chatHistory.length}</span>
                     )}
                   </div>
@@ -783,7 +792,22 @@ export default function App() {
 
                 {promptHistoryOpen && (
                   <div className="sidebar-section-content history-accordion-content">
-                    {chatHistory.length === 0 ? (
+                    {historyLoading ? (
+                      <div className="history-loading-placeholder">
+                        <div className="history-prompt-item grayout disabled" title="Loading chat sessions...">
+                          <svg className="history-item-icon history-spinner-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                          <span className="history-prompt-text grayout-text">Loading...</span>
+                        </div>
+                        <div className="history-prompt-item grayout disabled" style={{ opacity: 0.4 }}>
+                          <svg className="history-item-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                          </svg>
+                          <span className="history-prompt-text grayout-text">Loading...</span>
+                        </div>
+                      </div>
+                    ) : chatHistory.length === 0 ? (
                       <div className="history-empty">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="12" cy="12" r="10" />
@@ -796,52 +820,66 @@ export default function App() {
                         <div key={groupLabel} className="history-date-group">
                           <div className="history-date-label">{groupLabel}</div>
                           <div className="history-items-list">
-                            {items.map((session) => (
-                              <div
-                                key={session.id}
-                                className={`history-prompt-item ${currentChatId === session.id ? 'active' : ''} ${session.isPinned ? 'pinned' : ''}`}
-                                onClick={() => handleSelectChat(session)}
-                                onContextMenu={(e) => handleOpenContextMenu(e, session)}
-                                title={`${session.title}\n(${new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`}
-                              >
-                                <svg className="history-item-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                </svg>
-                                
-                                {editingChatId === session.id ? (
-                                  <input
-                                    autoFocus
-                                    className="history-rename-input"
-                                    value={editingTitle}
-                                    onChange={(e) => setEditingTitle(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleSaveRename(session.id);
-                                      if (e.key === 'Escape') setEditingChatId(null);
-                                    }}
-                                    onBlur={() => handleSaveRename(session.id)}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                ) : (
-                                  <span className="history-prompt-text">{session.title}</span>
-                                )}
-
-                                {session.isPinned && (
-                                  <svg className="history-item-pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" title="Pinned chat">
-                                    <line x1="12" y1="17" x2="12" y2="22" />
-                                    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.8l-1.78.89A2 2 0 0 0 5 15.24Z" />
-                                  </svg>
-                                )}
-
-                                <button
-                                  type="button"
-                                  className="history-item-more-btn"
-                                  onClick={(e) => handleOpenContextMenu(e, session)}
-                                  title="More options"
+                            {items.map((session) => {
+                              const isSessionLoading = selectingChatId === session.id;
+                              const isDisabled = historyLoading || isSessionLoading || (selectingChatId !== null && selectingChatId !== session.id);
+                              return (
+                                <div
+                                  key={session.id}
+                                  className={`history-prompt-item ${currentChatId === session.id ? 'active' : ''} ${session.isPinned ? 'pinned' : ''} ${isDisabled ? 'grayout disabled' : ''}`}
+                                  onClick={() => !isDisabled && handleSelectChat(session)}
+                                  onContextMenu={(e) => !isDisabled && handleOpenContextMenu(e, session)}
+                                  title={isSessionLoading ? 'Loading chat session...' : `${session.title}\n(${new Date(session.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`}
                                 >
-                                  •••
-                                </button>
-                              </div>
-                            ))}
+                                  {isSessionLoading ? (
+                                    <svg className="history-item-icon history-spinner-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                    </svg>
+                                  ) : (
+                                    <svg className="history-item-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                    </svg>
+                                  )}
+                                  
+                                  {editingChatId === session.id ? (
+                                    <input
+                                      autoFocus
+                                      className="history-rename-input"
+                                      value={editingTitle}
+                                      onChange={(e) => setEditingTitle(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleSaveRename(session.id);
+                                        if (e.key === 'Escape') setEditingChatId(null);
+                                      }}
+                                      onBlur={() => handleSaveRename(session.id)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  ) : (
+                                    <span className={`history-prompt-text ${isSessionLoading ? 'grayout-text' : ''}`}>
+                                      {isSessionLoading ? 'Loading...' : session.title}
+                                    </span>
+                                  )}
+
+                                  {session.isPinned && !isSessionLoading && (
+                                    <svg className="history-item-pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" title="Pinned chat">
+                                      <line x1="12" y1="17" x2="12" y2="22" />
+                                      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.8l-1.78.89A2 2 0 0 0 5 15.24Z" />
+                                    </svg>
+                                  )}
+
+                                  {!isSessionLoading && (
+                                    <button
+                                      type="button"
+                                      className="history-item-more-btn"
+                                      onClick={(e) => handleOpenContextMenu(e, session)}
+                                      title="More options"
+                                    >
+                                      •••
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))
@@ -940,12 +978,14 @@ export default function App() {
                   setSidebarOpen(true);
                   setPromptHistoryOpen(true);
                 }}
-                title="Chats History"
+                title={historyLoading ? "Loading Chats..." : "Chats History"}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
-                {chatHistory.length > 0 && (
+                {historyLoading ? (
+                  <span className="rail-count-badge grayout">...</span>
+                ) : chatHistory.length > 0 && (
                   <span className="rail-count-badge">{chatHistory.length}</span>
                 )}
               </button>
