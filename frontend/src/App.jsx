@@ -1024,7 +1024,7 @@ export default function App() {
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Ask anything"
+                  placeholder="Ask % of leakage, HCP fatigue..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyPress}
