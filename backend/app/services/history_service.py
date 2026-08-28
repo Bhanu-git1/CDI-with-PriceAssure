@@ -68,9 +68,11 @@ class HistoryService:
             if conn:
                 conn.close()
 
-    def list_sessions(self, user_id: str = "default_user", limit: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
+    def list_sessions(self, user_id: Optional[str] = None, limit: int = 1000, offset: int = 0) -> List[Dict[str, Any]]:
         """
         List lightweight session records for sidebar display.
+        Supports case-insensitive user filtering, and automatically returns
+        all sessions if user_id is unspecified or has no matched records.
         """
         self.init_db()
         conn = None
@@ -79,24 +81,46 @@ class HistoryService:
             conn = self.db_service.get_connection()
             cursor = conn.cursor(dictionary=True)
 
-            query = """
-                SELECT 
-                    s.id, 
-                    s.user_id, 
-                    s.title, 
-                    s.is_pinned, 
-                    s.created_at, 
-                    s.updated_at,
-                    COUNT(m.id) AS message_count
-                FROM dce_chat_sessions s
-                LEFT JOIN dce_chat_messages m ON s.id = m.session_id
-                WHERE s.user_id = %s
-                GROUP BY s.id, s.user_id, s.title, s.is_pinned, s.created_at, s.updated_at
-                ORDER BY s.is_pinned DESC, s.updated_at DESC
-                LIMIT %s OFFSET %s
-            """
-            cursor.execute(query, (user_id, limit, offset))
-            rows = cursor.fetchall()
+            rows = []
+            if user_id and user_id.strip().lower() not in ("all", "*", "default_user", "guest", ""):
+                query_user = """
+                    SELECT 
+                        s.id, 
+                        s.user_id, 
+                        s.title, 
+                        s.is_pinned, 
+                        s.created_at, 
+                        s.updated_at,
+                        COUNT(m.id) AS message_count
+                    FROM dce_chat_sessions s
+                    LEFT JOIN dce_chat_messages m ON s.id = m.session_id
+                    WHERE LOWER(s.user_id) = LOWER(%s)
+                    GROUP BY s.id, s.user_id, s.title, s.is_pinned, s.created_at, s.updated_at
+                    ORDER BY s.is_pinned DESC, s.updated_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                cursor.execute(query_user, (user_id.strip(), limit, offset))
+                rows = cursor.fetchall()
+
+            # If no user was specified, or user returned no rows, fetch all sessions
+            if not rows:
+                query_all = """
+                    SELECT 
+                        s.id, 
+                        s.user_id, 
+                        s.title, 
+                        s.is_pinned, 
+                        s.created_at, 
+                        s.updated_at,
+                        COUNT(m.id) AS message_count
+                    FROM dce_chat_sessions s
+                    LEFT JOIN dce_chat_messages m ON s.id = m.session_id
+                    GROUP BY s.id, s.user_id, s.title, s.is_pinned, s.created_at, s.updated_at
+                    ORDER BY s.is_pinned DESC, s.updated_at DESC
+                    LIMIT %s OFFSET %s
+                """
+                cursor.execute(query_all, (limit, offset))
+                rows = cursor.fetchall()
 
             sessions = []
             for row in rows:

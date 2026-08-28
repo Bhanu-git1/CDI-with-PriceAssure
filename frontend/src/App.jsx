@@ -9,7 +9,7 @@ import './App.css';
 const getApiEndpoint = () => {
   const envUrl = import.meta.env.VITE_API_URL;
   const savedUrl = localStorage.getItem('__mysql_chat_api_endpoint__') || localStorage.getItem('__sf_chat_api_endpoint__');
-  return savedUrl || envUrl || 'http://localhost:8000';
+  return savedUrl || envUrl || 'http://localhost:8008';
 };
 
 // How often to silently re-check backend/connection/LLM health in the background.
@@ -18,21 +18,11 @@ const STATUS_POLL_MS = 15000;
 // Helper to load chat history from localStorage with backwards compatibility
 const loadSavedSessions = () => {
   try {
-    const saved = localStorage.getItem('__dce_chat_history__') || localStorage.getItem('__dce_prompt_history__');
+    const saved = localStorage.getItem('__dce_chat_history__');
     if (!saved) return [];
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((item) => {
-      if (item.messages && Array.isArray(item.messages)) {
-        return item;
-      }
-      return {
-        id: item.id || `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        title: item.text || 'Chat Session',
-        messages: item.text ? [{ sender: 'user', text: item.text }] : [],
-        timestamp: item.timestamp || new Date().toISOString()
-      };
-    });
+    return parsed;
   } catch (err) {
     console.error("Failed to load chat history:", err);
     return [];
@@ -164,34 +154,6 @@ export default function App() {
     }
   };
 
-  const syncLocalToBackend = async (sessions) => {
-    try {
-      const res = await fetch(`${apiEndpoint}/api/chats/sync-local`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        },
-        body: JSON.stringify({
-          user_id: currentUser || 'default_user',
-          sessions: sessions
-        })
-      });
-      if (res.ok) {
-        const listRes = await fetch(
-          `${apiEndpoint}/api/chats?user_id=${encodeURIComponent(currentUser || 'default_user')}&limit=1000`,
-          { headers: { 'ngrok-skip-browser-warning': 'true' } }
-        );
-        if (listRes.ok) {
-          const listData = await listRes.json();
-          if (listData.sessions) setChatHistory(listData.sessions);
-        }
-      }
-    } catch (e) {
-      console.warn("Local history sync skipped:", e);
-    }
-  };
-
   const fetchChatsFromBackend = async () => {
     setHistoryLoading(true);
     try {
@@ -202,18 +164,11 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.sessions && Array.isArray(data.sessions)) {
-          if (data.sessions.length > 0) {
-            setChatHistory(data.sessions);
-            try {
-              localStorage.setItem('__dce_chat_history__', JSON.stringify(data.sessions));
-            } catch (e) {}
-          } else {
-            // First time sync from local storage if local has saved chats
-            const localSaved = loadSavedSessions();
-            if (localSaved.length > 0) {
-              await syncLocalToBackend(localSaved);
-            }
-          }
+          setChatHistory(data.sessions);
+          try {
+            localStorage.setItem('__dce_chat_history__', JSON.stringify(data.sessions));
+            localStorage.removeItem('__dce_prompt_history__');
+          } catch (e) {}
         }
       }
     } catch (err) {

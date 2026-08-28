@@ -185,7 +185,7 @@ async def schema_endpoint():
 
 @app.get("/api/chats")
 async def list_chats(
-    user_id: str = Query("default_user"),
+    user_id: Optional[str] = Query(None),
     limit: int = Query(1000, ge=1, le=5000),
     offset: int = Query(0, ge=0)
 ):
