@@ -29,3 +29,10 @@ logs/
 *.timestamp-*.mjs
 *.timestamp-*.js
 
+# Generated schema introspection dump (rebuild with
+# `python -m scripts.introspect_gpo`; the semantic YAML it feeds is committed)
+backend/scripts/gpo_schema_dump.json
+
+# Test caches
+.pytest_cache/
+

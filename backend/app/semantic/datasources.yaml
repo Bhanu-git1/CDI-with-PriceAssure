@@ -1,0 +1,443 @@
+# =====================================================================
+# DATA SOURCE MANIFEST
+# =====================================================================
+# The single place that declares every queryable data source. Adding a
+# source means adding a block here plus its semantic model file — no
+# Python change is required.
+#
+# Credentials are NEVER stored here. Each connection references the NAME
+# of an environment variable (see backend/.env), which config.py loads.
+#
+# Rollback: set `enabled: false` on any source to remove it from routing,
+# health checks and the UI without a code change.
+# =====================================================================
+
+version: 1
+
+# Source used when the router cannot decide and clarification is disabled.
+default_source: mysql_primary
+
+# --- Router tuning -----------------------------------------------------
+# Scores are additive per matched term (see router/source_router.py):
+#   entity hit (real table/object name)  +10
+#   strong keyword                        +6
+#   weak keyword                          +2
+#   exclude keyword                       -8
+router:
+  # Route deterministically only when the winner is both convincing and clear.
+  min_score: 6
+  # Winner must beat the runner-up by this much, else escalate to the LLM
+  # tie-break. This margin is the main defence against ambiguous prompts
+  # being answered from the wrong source.
+  min_margin: 4
+  # Below this LLM confidence the router ABSTAINS and asks the user which
+  # source they meant, instead of guessing.
+  min_llm_confidence: 0.6
+  # Keep a resolved source for short follow-up turns ("top 5 of those").
+  sticky_followup: true
+  sticky_max_tokens: 12
+  # Cache resolved (normalised prompt -> source) decisions.
+  decision_cache_size: 256
+
+sources:
+
+  # ===================================================================
+  # DB 1 — Commercial / Pharma Command Centre (UC1, UC2, UC4, UC5)
+  # ===================================================================
+  - id: mysql_primary
+    label: "MySQL Database (Commercial)"
+    # short_label is what the UI shows — sidebar, source selector, answer badge.
+    # Kept free of the engine name ("MySQL"): which engine backs a source is an
+    # implementation detail, not something a user picks between.
+    short_label: "Commercial"
+    kind: mysql
+    enabled: true
+    # Higher priority wins a dead-even tie. Preserves the pre-existing
+    # behaviour where MySQL took precedence over Salesforce.
+    priority: 10
+    badge: "mysql"
+    aliases:
+      - "commercial db"
+      - "commercial database"
+      - "database 1"
+      - "db1"
+      - "db 1"
+      - "accelerator"
+      - "primary db"
+    connection:
+      host_env: MYSQL_HOST
+      port_env: MYSQL_PORT
+      user_env: MYSQL_USER
+      password_env: MYSQL_PASSWORD
+      database_env: MYSQL_DATABASE
+      pool_name: dce_pool_primary
+      # Deliberately NOT read-only: this database also stores the chat
+      # transcripts, and HistoryService writes to them over this same pool.
+      # Question answering is still restricted by is_sql_safe().
+      read_only: false
+    semantic:
+      model_file: schema_model.yaml
+      style: semantic_model
+      # "legacy" reproduces the pre-multi-source trimming byte-for-byte, so
+      # DB 1 prompts are provably unchanged. Switching to "budgeted" would
+      # give this model better table coverage too, but only behind a
+      # regression run over the curated prompt set.
+      trim_strategy: legacy
+      max_chars: 3500
+    sandbox_global: db
+    dialect: mysql
+    # Chat transcripts live in this database but are infrastructure, not
+    # business data. Excluded so the assistant can never answer a question
+    # by querying its own conversation history.
+    exclude_tables:
+      - dce_chat_sessions
+      - dce_chat_messages
+    capabilities:
+      cross_table_search: true
+    routing:
+      domain: >
+        Pharma commercial operations: prescription leakage and claim rejections,
+        HCP digital fatigue and campaign engagement, HCP work-detail recording,
+        clinical medicine/tablet extraction from transcripts, and Salesforce
+        sync audit.
+      # Real table names — an explicit table name in a prompt is near-proof.
+      entities:
+        - Leakage_Activity
+        - leakage_history
+        - fatigue_score
+        - hcp_engagement_logs
+        - campaign_master
+        - Compliance_Table
+        - hcp_master
+        - hcp_master_details
+        - hcp_master_workdetails_history
+        - Tablet_Extract_History
+        - Transcript_Extraction_History
+        - medicine_extraction_log
+        - salesforce_sync_log
+        - copay_Claims_Transactions
+        - Reject_Code_Master
+        - Payer_Master
+        - Product_Master
+        - rep_details
+        - rep_master
+      # Verbatim from the previous MYSQL_PRIORITY_KEYWORDS tuple, so
+      # existing prompts route exactly as they did before.
+      strong_keywords:
+        - leakage
+        - fatigue
+        - compliance
+        - campaign
+        - claim
+        - claims
+        - rejection
+        - rejections
+        - pharmacy
+        - engagement
+        - mysql
+        - prescriber
+        - npi
+        - medicine
+        - medicines
+        - clinical
+        - tablet
+        - dosage
+        - extract
+        - extraction
+        - sync
+        - sync_log
+        - salesforce_sync_log
+        - transcript
+        - transcripts
+        - work detail
+        - work_detail
+        - workdetails
+        - audit
+        - history_id
+        - tablet_extract_history
+        - medicine_extraction_log
+      weak_keywords:
+        - hcp
+        - physician
+        - doctor
+        - brand
+        - payer
+        - medicaid
+        - medicare
+        - copay
+        - threshold
+        - webinar
+        - specialty
+        - speciality
+      exclude_keywords: []
+
+  # ===================================================================
+  # DB 2 — Memcot Customer Roster Validation
+  #
+  # Displayed as "Memcot", the business name for this program (it is the
+  # dominant value in GPO_CUST_HDR.GPO). The source id, the `gpo` schema, the
+  # GPO_* table prefix and the GPO_MYSQL_* env vars are deliberately unchanged:
+  # they are internal, and renaming them would invalidate saved transcripts and
+  # desync the generated semantic layer from the real table names.
+  # ===================================================================
+  - id: mysql_gpo
+    label: "Memcot Customer Roster Validation"
+    short_label: "Memcot"
+    kind: mysql
+    enabled: true
+    priority: 10
+    # CSS suffix for the answer badge — stays "gpo" so .source-badge-gpo and
+    # the selector's icon map keep applying.
+    badge: "gpo"
+    aliases:
+      - "memcot"
+      - "memcot db"
+      - "memcot database"
+      - "gpo"
+      - "gpo db"
+      - "gpo database"
+      - "database 2"
+      - "db2"
+      - "db 2"
+      - "validation db"
+      - "validation database"
+      - "roster db"
+    connection:
+      host_env: GPO_MYSQL_HOST
+      port_env: GPO_MYSQL_PORT
+      user_env: GPO_MYSQL_USER
+      password_env: GPO_MYSQL_PASSWORD
+      database_env: GPO_MYSQL_DATABASE
+      pool_name: dce_pool_gpo
+      # Every connection is put into a read-only transaction, so the SERVER
+      # rejects writes. is_sql_safe() is a regex and therefore a best effort;
+      # this is the enforcement. It matters here because the configured user
+      # (admin) has full DDL/DML rights on live operational tables.
+      read_only: true
+    semantic:
+      model_file: gpo_schema_model.yaml
+      style: semantic_model
+      # 70 tables across 17 domains: a fixed section order would let the long
+      # mapping-rules block consume the whole budget before any table was
+      # emitted, so the budget is allocated across sections instead.
+      trim_strategy: budgeted
+      max_chars: 7000
+      max_cols_per_table: 30
+    # A DISTINCT sandbox global. If the model emits `db.execute_sql(...)`
+    # while routed here, the sandbox raises NameError rather than silently
+    # answering from DB 1.
+    sandbox_global: gpo
+    dialect: mysql
+    # This database also contains a chat-history table pair (written by an
+    # earlier deployment). Excluded for the same reason as DB 1.
+    exclude_tables:
+      - dce_chat_sessions
+      - dce_chat_messages
+    capabilities:
+      # Cross-table LIKE search is DISABLED here. search_records() scans every
+      # text column of every table; this database holds 72 tables and several
+      # with 200k-500k rows (GPO_STAGED_INPUT, GPO_CUST_INPUT, GPO_HIN_VALIDATE,
+      # EISAI_STAGED_INPUT), so an unbounded scan would hammer the shared RDS
+      # instance. Targeted SELECTs only.
+      cross_table_search: false
+    routing:
+      domain: >
+        Memcot customer-roster validation pipeline: batch file upload and staging,
+        HIN / DEA / HRSA / USPS / COT / member validation against master lookup
+        tables, staged and final output generation, per-stage job tracking,
+        membership and structured-contract data, role-based access control,
+        and the pipeline audit log. Also holds client-specific pipelines for
+        Abbott, Eisai and REG.
+      entities:
+        - GPO_CUST_HDR
+        - GPO_CUST_INPUT
+        - GPO_STAGED_INPUT
+        - GPO_CUST_STG_OUTPUT
+        - GPO_CUST_OUTPUT
+        - GPO_INPUT_FORMAT
+        - GPO_OUTPUT_FORMAT
+        - GPO_HIN
+        - GPO_HIN_VALIDATE
+        - GPO_DEA
+        - GPO_DEA_VALIDATE
+        - GPO_HRSA
+        - GPO_HRSA_VALIDATE
+        - GPO_USPS
+        - GPO_USPS_VALIDATE
+        - GPO_COT_VALIDATE
+        - GPO_MEMBER_VALIDATE
+        - GPO_VALIDATION_JOBS
+        - GPO_LOGS
+        - GPO_ROLE_MASTER
+        - GPO_ROLE_PERMISSION
+        - GPO_ROLE_MAPPING
+        - GPO_USER_LOGIN
+        - GPO_ADMIN_VALIDATION_CONFIG
+        - GPO_MEMBERSHIP_HDR
+        - GPO_MEMBERSHIP_FORMAT
+        - GPO_MEMBERSHIP_HEIRARCHY
+        - MN_MEMBER
+        - MN_ORGANIZATION_ID
+        - MN_ORGANIZATION_ID_ASTELLAS
+        - MN_CF_ELIGIBLE_CUSTOMER
+        - MN_STRUCTURED_DOC
+        - MN_STRUCTURED_CONTRACT
+        - BUID
+        - BUTYPE
+        - DISPLAY_MSG
+        - MAIL_MONITOR
+        - TTBC
+      # Deliberately disjoint from mysql_primary.strong_keywords — a startup
+      # assertion in registry.py fails fast if that ever stops being true.
+      strong_keywords:
+        - memcot
+        - gpo
+        - hin
+        - dea
+        - hrsa
+        - usps
+        - cot
+        - class of trade
+        - hibcc
+        - batch
+        - batch_num
+        - batch number
+        - roster
+        - membership
+        - member validation
+        - structured contract
+        - structured doc
+        - eligible customer
+        - organization id
+        - role permission
+        - role master
+        - role mapping
+        - user login
+        - logged in
+        - login session
+        # "audit" alone belongs to DB 1 (its own audit-trail tables), so the
+        # more specific phrase is what claims a GPO pipeline audit question.
+        - audit trail
+        - staged input
+        - input format
+        - output format
+        - validation job
+        - validation type
+        - abbott
+        - eisai
+        - astellas
+        - buid
+        - butype
+        - ttbc
+        - mail monitor
+        - cust_hdr
+        - batch header
+        - customer roster
+      weak_keywords:
+        - validation
+        - validate
+        - validated
+        - upload
+        - staging
+        - staged
+        - output
+        - member
+        - members
+        - organization
+        - contract
+        - roles
+        - permission
+        - login
+        - address
+        - postal
+        - customer
+        - file
+        - job
+        - jobs
+      exclude_keywords:
+        - leakage
+        - fatigue
+        - sales rep
+        - salesforce
+
+  # ===================================================================
+  # Salesforce CRM (UC3)
+  # ===================================================================
+  - id: salesforce
+    label: "Salesforce CRM"
+    short_label: "Salesforce"
+    kind: salesforce
+    enabled: true
+    # Lower than the MySQL sources, matching the previous behaviour where
+    # MySQL/pharma keywords took precedence over Salesforce vocabulary.
+    priority: 5
+    badge: "salesforce"
+    aliases:
+      - "salesforce"
+      - "sfdc"
+      - "crm"
+    connection:
+      username_env: SF_USERNAME
+      password_env: SF_PASSWORD
+      security_token_env: SF_SECURITY_TOKEN
+      domain_env: SF_DOMAIN
+      session_id_env: SF_SESSION_ID
+      instance_url_env: SF_INSTANCE_URL
+    semantic:
+      model_file: salesforce_semantic_layer.yaml
+      # Injected as a raw YAML string, exactly as before — this file is not
+      # in the `semantic_model` shape the structured loader expects.
+      style: raw
+    sandbox_global: sf
+    dialect: soql
+    exclude_tables: []
+    capabilities:
+      cross_table_search: true
+    routing:
+      domain: >
+        Salesforce CRM custom objects for Healthcare Professionals (doctors)
+        and their assigned Sales Representatives: speciality, state license,
+        practice state, HCP status and contact details.
+      entities:
+        - Doctor__c
+        - Rep_Details__c
+      # Verbatim from the previous SALESFORCE_KEYWORDS tuple.
+      strong_keywords:
+        - salesforce
+        - doctor
+        - doctors
+        - sales rep
+        - sales reps
+        - sales representative
+        - sales representatives
+        - sales manager
+        - sales managers
+        - rep manager
+        - rep managers
+        - hcp status
+        - state license
+        - crm
+        - soql
+        - sosl
+      weak_keywords:
+        - speciality
+        - specialty
+        - practice state
+        - license
+      exclude_keywords: []
+
+# =====================================================================
+# CROSS-SOURCE LINKS
+# =====================================================================
+# DB 1 and DB 2 live on the SAME MySQL instance
+# (genai.cjwqmm4a21xa.ap-south-1.rds.amazonaws.com), so schema-qualified
+# joins such as `accelerator.hcp_master JOIN gpo.MN_MEMBER` are physically
+# possible IF the connecting user holds SELECT on both schemas.
+#
+# No link is declared yet: no shared business key between the commercial
+# domain (Prescriber_NPI, sf_id, rep_id) and the GPO domain (BATCH_NUM,
+# MEMBER_ID, HIN, DEA) has been confirmed. Only entries with
+# `verified: true` are ever offered to the model — an unverified cross-DB
+# join produces confidently wrong numbers, which is worse than answering
+# from a single source.
+cross_source_links: []

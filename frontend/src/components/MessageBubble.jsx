@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import DataTable from './DataTable';
 import DataChart from './DataChart';
 import { getFollowUpSuggestions } from '../utils/suggestionHelper';
+import { sourceIcon } from './SourceSelector';
 
 function Markdown({ children }) {
   return (
@@ -13,8 +14,12 @@ function Markdown({ children }) {
   );
 }
 
-export default function MessageBubble({ message, onSelectSuggestion, previousUserPrompt }) {
-  const { sender, text, sql, data, error, source } = message;
+export default function MessageBubble({ message, onSelectSuggestion, previousUserPrompt, onPickSource }) {
+  const {
+    sender, text, sql, data, error, source,
+    source_badge: sourceBadge, routing,
+    needs_clarification: needsClarification, candidates,
+  } = message;
   const [activeTab, setActiveTab] = useState('answer'); // answer | table | chart
   const [showSql, setShowSql] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -29,8 +34,23 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Compute follow-up suggestions based on context for assistant responses
-  const followUpSuggestions = sender === 'assistant' ? getFollowUpSuggestions(previousUserPrompt) : [];
+  // Suppress generic follow-ups while the assistant is waiting for the user to
+  // say which data source they meant — the only useful next action is choosing.
+  // Scoped to the source that answered, so a chip never moves the
+  // conversation to a different database without the user asking.
+  const followUpSuggestions =
+    sender === 'assistant' && !needsClarification
+      ? getFollowUpSuggestions(previousUserPrompt, message.source_id)
+      : [];
+
+  // Badge class comes from the backend-declared badge, falling back to the
+  // label for transcripts saved before source_badge existed.
+  const badgeKey = (sourceBadge || source || '').toLowerCase();
+  const routingTitle = routing
+    ? `Routed by ${routing.stage}` +
+      (routing.confidence != null ? ` · confidence ${routing.confidence}` : '') +
+      (routing.reason ? `\n${routing.reason}` : '')
+    : undefined;
 
   return (
     <div className={`message-row ${sender}`}>
@@ -92,8 +112,8 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
               </button>
 
               {source && (
-                <span className={`source-badge source-badge-${source.toLowerCase()}`}>
-                  {source === 'Salesforce' ? '☁️' : '🗄️'} Source: {source}
+                <span className={`source-badge source-badge-${badgeKey}`} title={routingTitle}>
+                  {sourceIcon(badgeKey)} Source: {source}
                 </span>
               )}
             </div>
@@ -116,6 +136,28 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
         {error && (
           <div className="error-message">
             <strong>Execution Error:</strong> {error}
+          </div>
+        )}
+
+        {/* Router abstained: let the user choose the data source rather than
+            answering from a possibly wrong one. */}
+        {sender === 'assistant' && needsClarification && candidates?.length > 0 && (
+          <div className="source-clarify-container">
+            <div className="source-clarify-chips">
+              {candidates.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="source-clarify-chip"
+                  onClick={() => onPickSource && onPickSource(c.id)}
+                  disabled={!onPickSource}
+                  title={c.why}
+                >
+                  <span className="source-clarify-chip-icon">{sourceIcon(c.badge)}</span>
+                  <span className="source-clarify-chip-text">Ask {c.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

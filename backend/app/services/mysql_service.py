@@ -1,6 +1,7 @@
 import re
 import json
 import logging
+import time
 from typing import List, Dict, Any
 import mysql.connector
 from mysql.connector import pooling, Error as MySQLError
@@ -15,13 +16,24 @@ class MySQLService:
     """
 
     def __init__(self, host: str = "localhost", port: int = 3306, user: str = "",
-                 password: str = "", database: str = "", pool_size: int = 5):
+                 password: str = "", database: str = "", pool_size: int = 5,
+                 pool_name: str = "dce_pool", read_only: bool = False):
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         self.database = database
         self.pool_size = pool_size
+        # Distinct per source, so pool logs are attributable when more than one
+        # database is connected.
+        self.pool_name = pool_name
+        # When set, every connection handed out is put into a read-only
+        # transaction mode, so the SERVER rejects writes. is_sql_safe() is a
+        # regex and therefore a best effort; this is enforcement. Must stay
+        # False for the database that stores chat transcripts, which writes.
+        self.read_only = read_only
+        # Maximum rows any single generated query may return.
+        self.row_limit = 200
         self._pool = None
 
     def get_connection(self):
@@ -35,7 +47,7 @@ class MySQLService:
             logger.info(f"Creating MySQL connection pool for '{self.database}' at {self.host}:{self.port}...")
             try:
                 self._pool = pooling.MySQLConnectionPool(
-                    pool_name="dce_pool",
+                    pool_name=self.pool_name,
                     pool_size=self.pool_size,
                     pool_reset_session=True,
                     host=self.host,
@@ -51,7 +63,24 @@ class MySQLService:
                 logger.error(f"MySQL connection pool creation failed: {e}")
                 raise e
 
-        return self._pool.get_connection()
+        conn = self._pool.get_connection()
+
+        if self.read_only:
+            # The pool is created with pool_reset_session=True, so session state
+            # is cleared when a connection is returned — this has to be re-applied
+            # on every checkout rather than once at pool creation.
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SET SESSION TRANSACTION READ ONLY")
+                cursor.close()
+            except MySQLError as e:
+                # A connection that cannot be made read-only must not be handed
+                # out for a source declared read-only.
+                conn.close()
+                logger.error(f"Could not set read-only session on '{self.database}': {e}")
+                raise
+
+        return conn
 
     def is_sql_safe(self, query: str) -> bool:
         """Ensure the query is a read-only statement (SELECT, SHOW, EXPLAIN, DESCRIBE)."""
@@ -123,6 +152,40 @@ class MySQLService:
         except Exception as e:
             return json.dumps({"error": f"Error describing table '{table_name}': {str(e)}"})
 
+    # A trailing LIMIT clause, optionally with an offset in either syntax.
+    # Anchored to the end because that is the only place an outer LIMIT can
+    # appear — a LIMIT inside a subquery does not bound the result set, so
+    # matching one anywhere in the statement (as this used to) left the outer
+    # query uncapped.
+    _TRAILING_LIMIT = re.compile(
+        r"\bLIMIT\s+\d+(?:\s*,\s*\d+)?(?:\s+OFFSET\s+\d+)?\s*$",
+        re.IGNORECASE,
+    )
+
+    def apply_row_limit(self, query: str, max_rows: int = None) -> str:
+        """
+        Cap the number of rows a query can return.
+
+        Only row-returning statements are capped. SHOW / DESCRIBE / EXPLAIN are
+        left alone because they reject a LIMIT clause outright.
+
+        There is deliberately no aggregate exemption. The previous version
+        skipped the cap whenever an aggregate function appeared anywhere in the
+        statement, which a scalar subquery such as
+        `(SELECT MAX(Fatigue) FROM fatigue_score)` in the SELECT list was enough
+        to trigger — leaving genuinely row-returning queries unbounded. Adding a
+        LIMIT to a single-row aggregate costs nothing, whereas omitting one from
+        a row query can return the whole table, so the bias is toward capping.
+        """
+        if max_rows is None:
+            max_rows = self.row_limit
+        head = query.lstrip("( \t\r\n").upper()
+        if not (head.startswith("SELECT") or head.startswith("WITH")):
+            return query
+        if self._TRAILING_LIMIT.search(query):
+            return query
+        return f"{query} LIMIT {max_rows}"
+
     def execute_sql(self, sql_query: str) -> str:
         """
         Execute read-only SQL query against MySQL. Limit defaults to 200 records.
@@ -135,18 +198,9 @@ class MySQLService:
             conn = self.get_connection()
             cursor = conn.cursor(dictionary=True)
 
-            executed_query = sql_query.strip().rstrip(";")
-
-            # Add LIMIT if not present (skip for aggregate-only queries)
-            limit_match = re.search(r"\bLIMIT\b\s+\d+", executed_query, re.IGNORECASE)
-            if not limit_match:
-                is_aggregate = re.search(
-                    r"\b(COUNT\s*\(\s*\)|COUNT\s*\(|SUM\s*\(|AVG\s*\(|MIN\s*\(|MAX\s*\()",
-                    executed_query, re.IGNORECASE
-                )
-                is_grouped = re.search(r"\bGROUP\s+BY\b", executed_query, re.IGNORECASE)
-                if not (is_aggregate and not is_grouped):
-                    executed_query += " LIMIT 200"
+            original_query = sql_query.strip().rstrip(";")
+            executed_query = self.apply_row_limit(original_query)
+            capped = executed_query != original_query
 
             logger.info(f"Executing SQL: {executed_query}")
             cursor.execute(executed_query)
@@ -167,6 +221,20 @@ class MySQLService:
                 "recordsReturned": len(cleaned_records),
                 "records": cleaned_records
             }
+
+            # Hitting the injected cap exactly almost always means the result
+            # set was cut short. Say so, rather than letting the caller report
+            # the cap as if it were the total — several of these tables hold
+            # tens of thousands of rows.
+            if capped and len(cleaned_records) >= self.row_limit:
+                output["truncated"] = True
+                output["rowLimit"] = self.row_limit
+                output["note"] = (
+                    f"Result truncated to the first {self.row_limit} rows. More rows match; "
+                    f"narrow the query with a WHERE clause or aggregate with COUNT/GROUP BY "
+                    f"to describe the full set."
+                )
+
             return json.dumps(output, indent=2, default=str)
 
         except Exception as e:
@@ -230,6 +298,52 @@ class MySQLService:
             return json.dumps(output, indent=2, default=str)
         except Exception as e:
             return json.dumps({"error": f"MySQL search error: {str(e)}"})
+
+    def get_row_counts(self, tables: List[str] = None, ttl_seconds: int = 600) -> Dict[str, int]:
+        """
+        Live row counts, cached briefly.
+
+        Exists because hardcoded counts in a prompt go stale silently: the DB 1
+        semantic layer described Leakage_Activity as "60 rows" when it held
+        25,323, which encourages the model to list rather than aggregate. A
+        cached live read cannot drift.
+
+        COUNT(*) is used rather than INFORMATION_SCHEMA.TABLE_ROWS, which is an
+        InnoDB estimate and can be off by large factors.
+        """
+        now = time.time()
+        cached = getattr(self, "_row_count_cache", None)
+        if cached and now - cached[0] < ttl_seconds:
+            counts = cached[1]
+            return {t: counts[t] for t in tables if t in counts} if tables else counts
+
+        counts = {}
+        conn = None
+        cursor = None
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SHOW TABLES")
+            present = {row[0] for row in cursor.fetchall()}
+            for table in sorted(present):
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM `{table}`")
+                    counts[table] = cursor.fetchone()[0]
+                except Exception as e:
+                    logger.warning(f"Could not count rows in '{table}': {e}")
+        except Exception as e:
+            logger.warning(f"Row count refresh failed on '{self.database}': {e}")
+            # Serve a stale cache rather than nothing.
+            if cached:
+                counts = cached[1]
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+        self._row_count_cache = (now, counts)
+        return {t: counts[t] for t in tables if t in counts} if tables else counts
 
     def get_schema_overview(self) -> str:
         """

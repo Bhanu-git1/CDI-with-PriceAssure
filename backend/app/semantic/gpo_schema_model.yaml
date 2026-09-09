@@ -1,0 +1,3233 @@
+# ============================================================
+# GPO CUSTOMER ROSTER VALIDATION — SEMANTIC LAYER (DB 2)
+# ============================================================
+# GENERATED FILE — do not edit by hand.
+#   Regenerate with:
+#     python -m scripts.introspect_gpo
+#     python -m scripts.build_gpo_semantic_model
+#
+# Columns, types and row counts are read from the live database, so they
+# are accurate by construction. Business knowledge (domains, joins,
+# mapping rules, measures) is curated in
+# scripts/build_gpo_semantic_model.py.
+# ============================================================
+version: 2
+semantic_model:
+  name: gpo_customer_roster_validation
+  description: >
+    Semantic layer for the GPO customer-roster validation platform (72 tables in schema 'gpo'). A batch of customer records is uploaded, staged, mapped to a standard shape, validated against HIN / DEA / HRSA / USPS master data plus Class-of-Trade and membership matching, then merged and formatted into a final output file. Every stage is status-tracked and audit-logged. The schema also holds membership/contract reference data, role-based access control, and three client-specific parallel pipelines (REG, Abbott, Eisai).
+
+  # ============================================================
+  # PARALLEL PROGRAM PIPELINES — pick the right table prefix
+  # ============================================================
+  programs:
+    - id: gpo
+      table_prefix: "GPO_"
+      table_count: 27
+      note: >
+        Base/default program. Use these tables unless the user names another program.
+    - id: reg
+      table_prefix: "REG_"
+      table_count: 13
+      note: >
+        REG program. Mirrors the GPO_* pipeline shape.
+    - id: abbott
+      table_prefix: "ABBOTT_"
+      table_count: 10
+      note: >
+        Abbott program. Customer LEH flow; uses ABBOTT_CYCLIC_VALIDATE and ABBOTT_PARENT_VALIDATE instead of HIN/DEA/USPS validators.
+    - id: eisai
+      table_prefix: "EISAI_"
+      table_count: 9
+      note: >
+        Eisai program. Roster change tracking (additions/removals/changes), not validation.
+
+  # ============================================================
+  # DOMAINS — business grouping, and the prompt-trimming index
+  # ============================================================
+  domains:
+    - name: rbac_security
+      purpose: >
+        Roles, CRUD permissions, user-role assignment and login/token sessions
+      tables: [GPO_ROLE_MASTER, GPO_ROLE_PERMISSION, GPO_ROLE_MAPPING, GPO_USER_LOGIN]
+      keywords: ["role", "roles", "permission", "permissions", "rbac", "login", "logins", "token", "user access", "who can", "admin", "analyst", "session"]
+    - name: membership_contract
+      purpose: >
+        Member, organization identifier, eligible customer, structured document and contract data
+      tables: [MN_MEMBER, MN_ORGANIZATION_ID, MN_ORGANIZATION_ID_ASTELLAS, MN_CF_ELIGIBLE_CUSTOMER, MN_STRUCTURED_DOC, MN_STRUCTURED_CONTRACT]
+      keywords: ["member", "members", "membership", "organization", "org id", "identifier", "eligible customer", "eligibility", "contract", "contracts", "structured doc", "structured contract", "astellas"]
+    - name: customer_upload
+      purpose: >
+        Batch file upload, raw staging and standardized customer input
+      tables: [GPO_CUST_HDR, GPO_STAGED_INPUT, GPO_CUST_INPUT, GPO_INPUT_FORMAT]
+      keywords: ["upload", "uploaded", "batch", "batches", "batch_num", "batch number", "file", "files", "roster", "staged", "staging", "input format", "customer input", "batch header", "record count"]
+    - name: hin_validation
+      purpose: >
+        HIN master lookup and HIN validation results
+      tables: [GPO_HIN, GPO_HIN_VALIDATE]
+      keywords: ["hin", "hibcc", "health industry number"]
+    - name: dea_validation
+      purpose: >
+        DEA master lookup and DEA validation results
+      tables: [GPO_DEA, GPO_DEA_VALIDATE]
+      keywords: ["dea", "drug enforcement"]
+    - name: hrsa_validation
+      purpose: >
+        HRSA master lookup and HRSA validation results (340B)
+      tables: [GPO_HRSA, GPO_HRSA_VALIDATE]
+      keywords: ["hrsa", "340b"]
+    - name: address_validation
+      purpose: >
+        USPS address standardisation and correction
+      tables: [GPO_USPS, GPO_USPS_VALIDATE]
+      keywords: ["usps", "address", "addresses", "street", "city", "postal", "zip", "plus 4", "plus_4"]
+    - name: cot_validation
+      purpose: >
+        Class-of-Trade validation, derived by reconciling HIN, DEA and RODB COT values
+      tables: [GPO_COT_VALIDATE]
+      keywords: ["cot", "class of trade", "hibcc_cot", "dea_cot", "rodb_cot", "trade class"]
+    - name: member_validation
+      purpose: >
+        Membership matching and identifier/address completeness checks
+      tables: [GPO_MEMBER_VALIDATE]
+      keywords: ["member validation", "member match", "matching criteria", "mismatch", "member validate"]
+    - name: output_processing
+      purpose: >
+        Merge of all validation results into staged output, then the final formatted output
+      tables: [GPO_CUST_STG_OUTPUT, GPO_CUST_OUTPUT, GPO_OUTPUT_FORMAT]
+      keywords: ["output", "outputs", "final output", "staged output", "stg output", "deliverable", "output format", "generated file", "corrected"]
+    - name: job_tracking
+      purpose: >
+        Per-stage processing status and progress for each batch
+      tables: [GPO_VALIDATION_JOBS, GPO_CUST_HDR]
+      keywords: ["job", "jobs", "status", "progress", "stage", "stages", "pending", "failed", "completed", "in-progress", "processing time", "validation job"]
+    - name: audit_log
+      purpose: >
+        Central audit trail — every module writes an action row here
+      tables: [GPO_LOGS]
+      keywords: ["log", "logs", "gpo logs", "user action", "action_desc", "audit trail", "who did", "history of actions", "activity"]
+    - name: configuration
+      purpose: >
+        Administrative matching thresholds and membership file configuration
+      tables: [GPO_ADMIN_VALIDATION_CONFIG, GPO_MEMBERSHIP_FORMAT, GPO_MEMBERSHIP_HDR, GPO_MEMBERSHIP_HEIRARCHY]
+      keywords: ["config", "configuration", "threshold", "similarity", "matching percentage", "membership format", "membership header", "hierarchy", "heirarchy", "gpo hierarchy", "parent", "grandparent", "child"]
+    - name: reference_data
+      purpose: >
+        Supporting reference, display-message and mail monitoring data
+      tables: [BUID, BUTYPE, DISPLAY_MSG, MAIL_MONITOR, TTBC]
+      keywords: ["buid", "butype", "business unit", "display message", "msg", "mail monitor", "ttbc", "reference data"]
+    - name: program_reg
+      purpose: >
+        REG program's own copy of the upload/validate/output pipeline
+      tables: [REG_CUST_HDR, REG_CUST_INPUT, REG_STAGED_INPUT, REG_CUST_STG_OUTPUT, REG_CUST_OUTPUT, REG_HIN_VALIDATE, REG_DEA_VALIDATE, REG_USPS_VALIDATE, REG_VALIDATION_JOBS, REG_LOGS, REG_INPUT_FORMAT, REG_OUTPUT_FORMAT, REG_REPORT_FORMAT]
+      keywords: ["reg", "reg program", "reg batch", "reg pipeline"]
+    - name: program_abbott
+      purpose: >
+        Abbott program: customer LEH pipeline, cyclic and parent validation
+      tables: [ABBOTT_CUST_HDR, ABBOTT_CUSTOMER_LEH_INPUT, ABBOTT_CUSTOMER_LEH_STG_INPUT, ABBOTT_CUSTOMER_LEH_STG_OUTPUT, ABBOTT_CUSTOMER_LEH_OUTPUT, ABBOTT_CYCLIC_VALIDATE, ABBOTT_PARENT_VALIDATE, ABBOTT_LOGS, ABBOTT_MN_MEMBER, ABBOTT_MN_CMTY_EDGE]
+      keywords: ["abbott", "leh", "cyclic", "parent validate", "community edge", "cmty"]
+    - name: program_eisai
+      purpose: >
+        Eisai program: GPO roster change-tracking (additions, removals, address, identifier and hierarchy changes)
+      tables: [EISAI_CUST_HDR, EISAI_STAGED_INPUT, EISAI_GPO_ROSTER, EISAI_ADDITIONS, EISAI_REMOVALS, EISAI_ADDRESS_CHANGES, EISAI_IDENTIFIER_CHANGES, EISAI_MEMBERSHIP_HEIRARCHY_CHANGES, EISAI_INPUT_FORMAT]
+      keywords: ["eisai", "additions", "removals", "address changes", "identifier changes", "roster changes", "gpo roster"]
+
+  # ============================================================
+  # TABLES & COLUMNS (introspected from the live schema)
+  # ============================================================
+  sources:
+    - name: mysql_gpo
+      database: gpo
+      tables:
+
+        - name: ABBOTT_CUSTOMER_LEH_INPUT
+          row_count: 740
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: GROUP_MEMBER_NAME
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: RELATION_TYPE
+              type: varchar(255)
+            - name: COMMENT
+              type: varchar(510)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(50)
+            - name: MISMATCH_FIELD
+              type: varchar(255)
+
+        - name: ABBOTT_CUSTOMER_LEH_OUTPUT
+          row_count: 201
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: GROUP_MEMBER_NAME
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: RELATION_TYPE
+              type: varchar(255)
+            - name: COMMENT
+              type: varchar(510)
+            - name: STATUS
+              type: varchar(50)
+            - name: MATCHING_TYPE
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: ABBOTT_CUSTOMER_LEH_STG_INPUT
+          row_count: 729
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: GROUP_MEMBER_NAME
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: RELATION_TYPE
+              type: varchar(255)
+            - name: COMMENT
+              type: varchar(510)
+            - name: STATUS
+              type: varchar(50)
+            - name: MISMATCH_FIELD
+              type: varchar(255)
+            - name: IS_ERROR
+              type: tinyint(1)
+            - name: ERROR_MESSAGE
+              type: varchar(500)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: ABBOTT_CUSTOMER_LEH_STG_OUTPUT
+          row_count: 362
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: GROUP_MEMBER_NAME
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: RELATION_TYPE
+              type: varchar(255)
+            - name: COMMENT
+              type: varchar(510)
+            - name: STATUS
+              type: varchar(50)
+            - name: MATCHING_TYPE
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: ABBOTT_CUST_HDR
+          row_count: 95
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: BATCH_NUM
+              type: int
+              key: primary
+            - name: FILE_NAME
+              type: varchar(255)
+            - name: CYCLIC_VALIDATED
+              type: tinyint(1)
+            - name: PARENT_VALIDATED
+              type: tinyint(1)
+            - name: isOutputGenerated
+              type: tinyint(1)
+            - name: TOTAL_RECORDS
+              type: int
+            - name: VALID_RECORDS
+              type: int
+            - name: ERROR_RECORDS
+              type: int
+            - name: CURRENT_ACTION
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: ABBOTT_CYCLIC_VALIDATE
+          row_count: 520
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: GROUP_MEMBER_NAME
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: EDGE_TYPE
+              type: int
+            - name: MATCHING_TYPE
+              type: varchar(255)
+            - name: COMMENT
+              type: varchar(510)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: ABBOTT_LOGS
+          row_count: 346
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: USER_ACTION
+              type: varchar(255)
+            - name: action_desc
+              type: text
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: ABBOTT_MN_CMTY_EDGE
+          row_count: 8
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: S_NO
+              type: int
+              key: primary
+            - name: SOURCE_ID
+              type: int
+            - name: DEST_ID
+              type: int
+            - name: EFFECTIVE_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: EDGE_TYPE
+              type: int
+            - name: CREATED_BY
+              type: varchar(100)
+            - name: CREATED_DATE
+              type: datetime
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(100)
+
+        - name: ABBOTT_MN_MEMBER
+          row_count: 12
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: S_NO
+              type: int
+              key: primary
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: MEMBER_ID
+              type: int
+            - name: CREATED_BY
+              type: varchar(100)
+            - name: CREATED_DATE
+              type: datetime
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(100)
+
+        - name: ABBOTT_PARENT_VALIDATE
+          row_count: 468
+          domain: program_abbott
+          description: >
+            Abbott program pipeline table — Abbott-specific customer LEH / validation flow.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: GROUP_MEMBER_NAME
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: EDGE_TYPE
+              type: int
+            - name: MATCHING_TYPE
+              type: varchar(255)
+            - name: COMMENT
+              type: varchar(510)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: BUID
+          row_count: 1020
+          domain: reference_data
+          description: >
+            Business-unit identifier reference data.
+          columns:
+            - name: BUID_NUM
+              type: bigint
+              key: primary
+            - name: BUNIT_NUM
+              type: bigint
+            - name: BUID_DT_START
+              type: date
+            - name: BUID_DT_END
+              type: date
+            - name: BUID_IDENTIFIER
+              type: varchar(80)
+            - name: DISPSEQTYP_CD
+              type: varchar(10)
+            - name: STATUS_NUM
+              type: bigint
+
+        - name: BUTYPE
+          row_count: 1018
+          domain: reference_data
+          description: >
+            Business-unit type reference data.
+          columns:
+            - name: BUTYPE_NUM
+              type: bigint
+              key: primary
+            - name: BUNIT_NUM
+              type: bigint
+            - name: BUNITTYP_ID
+              type: varchar(10)
+            - name: BUTYPE_DT_START
+              type: date
+            - name: BUTYPE_DT_END
+              type: date
+
+        - name: DISPLAY_MSG
+          row_count: 20
+          domain: reference_data
+          description: >
+            UI display message catalogue (MSG_NUM, MSG_TEXT, MSG_CONTEXT).
+          columns:
+            - name: MSG_NUM
+              type: bigint
+            - name: MSG_TEXT
+              type: varchar(2000)
+            - name: MSG_CONTEXT
+              type: varchar(255)
+
+        - name: EISAI_ADDITIONS
+          row_count: 60106
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: PARENT_FLAG
+              type: varchar(20)
+            - name: PARENT_ID
+              type: varchar(50)
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CHILD_ID
+              type: varchar(50)
+            - name: CHILD_NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: HIN
+              type: varchar(50)
+            - name: DEA
+              type: varchar(50)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COT
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: EISAI_ADDRESS_CHANGES
+          row_count: 60074
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: PARENT_FLAG
+              type: varchar(20)
+            - name: PARENT_ID
+              type: varchar(50)
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CHILD_ID
+              type: varchar(50)
+            - name: CHILD_NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: HIN
+              type: varchar(50)
+            - name: DEA
+              type: varchar(50)
+            - name: OLD_ADDRESS
+              type: varchar(255)
+            - name: NEW_ADDRESS
+              type: varchar(255)
+            - name: ADDRESS_CHANGE_DATE
+              type: date
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COT
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: EISAI_CUST_HDR
+          row_count: 78
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: BATCH_NUM
+              type: int
+              key: primary
+            - name: FILE_NAME
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: HIN_VALIDATED
+              type: tinyint(1)
+            - name: DEA_VALIDATED
+              type: tinyint(1)
+            - name: USPS_VALIDATED
+              type: tinyint(1)
+            - name: COT_VALIDATED
+              type: tinyint(1)
+            - name: HRSA_VALIDATED
+              type: tinyint(1)
+            - name: MEMBER_VALIDATED
+              type: tinyint(1)
+            - name: VALIDATION_TYPE
+              type: varchar(255)
+            - name: isOutputGenerated
+              type: tinyint(1)
+            - name: GPO
+              type: varchar(255)
+            - name: SHEET_NAME
+              type: varchar(255)
+            - name: SHEET_COUNT
+              type: int
+            - name: TOTAL_RECORDS
+              type: int
+            - name: VALID_RECORDS
+              type: int
+            - name: ERROR_RECORDS
+              type: int
+            - name: CURRENT_ACTION
+              type: varchar(50)
+
+        - name: EISAI_GPO_ROSTER
+          row_count: 60070
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: PARENT_FLAG
+              type: varchar(20)
+            - name: PARENT_ID
+              type: varchar(50)
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CHILD_ID
+              type: varchar(50)
+            - name: CHILD_NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: HIN
+              type: varchar(50)
+            - name: DEA
+              type: varchar(50)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COT
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: EISAI_IDENTIFIER_CHANGES
+          row_count: 60076
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: PARENT_FLAG
+              type: varchar(20)
+            - name: PARENT_ID
+              type: varchar(50)
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CHILD_ID
+              type: varchar(50)
+            - name: CHILD_NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: OLD_HIN
+              type: varchar(50)
+            - name: NEW_HIN
+              type: varchar(50)
+            - name: HIN_CHANGE_DATE
+              type: datetime
+            - name: OLD_DEA
+              type: varchar(50)
+            - name: NEW_DEA
+              type: varchar(50)
+            - name: DEA_CHANGE_DATE
+              type: datetime
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COT
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: EISAI_INPUT_FORMAT
+          row_count: 14
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: SHEET_NAME
+              type: varchar(255)
+            - name: INPUT_FORMAT
+              type: varchar(1028)
+            - name: DEFAULT_FORMAT
+              type: varchar(1028)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: MAIL_DISTRIBUTION
+              type: varchar(512)
+
+        - name: EISAI_MEMBERSHIP_HEIRARCHY_CHANGES
+          row_count: 60034
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: PARENT_FLAG
+              type: varchar(20)
+            - name: OLD_PARENT_ID
+              type: varchar(50)
+            - name: OLD_PARENT_NAME
+              type: varchar(255)
+            - name: NEW_PARENT_ID
+              type: varchar(50)
+            - name: NEW_PARENT_NAME
+              type: varchar(255)
+            - name: CHILD_ID
+              type: varchar(50)
+            - name: CHILD_NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: HIN
+              type: varchar(50)
+            - name: DEA
+              type: varchar(50)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COT
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: EISAI_REMOVALS
+          row_count: 60084
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: PARENT_FLAG
+              type: varchar(20)
+            - name: MEMBER_ID
+              type: varchar(50)
+            - name: MEMBER_NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: HIN
+              type: varchar(50)
+            - name: DEA
+              type: varchar(50)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COT
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: EISAI_STAGED_INPUT
+          row_count: 496743
+          domain: program_eisai
+          description: >
+            Eisai program table — GPO roster change tracking for the Eisai program only.
+          columns:
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: SHEET_NAME
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: Parent Flag
+              type: text
+            - name: Parent ID
+              type: text
+            - name: Parent Name
+              type: text
+            - name: Child ID
+              type: text
+            - name: Child Name
+              type: text
+            - name: Street
+              type: text
+            - name: City
+              type: text
+            - name: State
+              type: text
+            - name: Postal Code
+              type: text
+            - name: HIN
+              type: text
+            - name: DEA
+              type: text
+            - name: Start Date
+              type: text
+            - name: End Date
+              type: text
+            - name: COT
+              type: text
+            - name: Member name
+              type: text
+            - name: Member ID
+              type: text
+            - name: Old HIN
+              type: text
+            - name: New HIN
+              type: text
+            - name: HIN Change Date
+              type: text
+            - name: Old DEA
+              type: text
+            - name: New DEA
+              type: text
+            - name: DEA Change Date
+              type: text
+            - name: Old Parent ID
+              type: text
+            - name: Old Parent Name
+              type: text
+            - name: New Parent ID
+              type: text
+            - name: New Parent Name
+              type: text
+            - name: Old Address
+              type: text
+            - name: New Address
+              type: text
+            - name: Address Change Date
+              type: text
+            - name: S.No
+              type: text
+            - name: Name
+              type: text
+            - name: Customer Type
+              type: text
+            - name: HRSA
+              type: text
+          # +71 further columns not listed here —
+          # call describe_table('EISAI_STAGED_INPUT') for the complete list.
+
+        - name: GPO_ADMIN_VALIDATION_CONFIG
+          row_count: 20
+          domain: configuration
+          description: >
+            Administrative matching configuration: COMPARISON_FIELDS, SIMILIARITY_TYPE, MATCHING_PERCENTAGE, THRESHOLD.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: COMPARISON_FIELDS
+              type: varchar(500)
+            - name: SIMILIARITY_TYPE
+              type: varchar(100)
+            - name: MATCHING_PERCENTAGE
+              type: varchar(100)
+            - name: THRESHOLD
+              type: varchar(50)
+            - name: FLAG
+              type: varchar(50)
+            - name: CREATED_BY
+              type: varchar(100)
+            - name: CREATED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(100)
+            - name: MODIFIED_DATE
+              type: datetime
+
+        - name: GPO_COT_VALIDATE
+          row_count: 11858
+          domain: cot_validation
+          description: >
+            Class-of-Trade validation results, keyed by BATCH_NUM + CUSTOMER_NAME. DERIVED, not a master lookup: reconciles ORIGINAL_COT against HIBCC_COT (from HIN), DEA_COT (from DEA) and RODB_COT to produce CORRECTED_COT.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: CUSTOMER_NAME
+              type: varchar(255)
+            - name: CORRECTED_HIN
+              type: varchar(255)
+            - name: CORRECTED_DEA
+              type: varchar(255)
+            - name: CORRECTED_STREET
+              type: varchar(255)
+            - name: CORRECTED_CITY
+              type: varchar(255)
+            - name: CORRECTED_STATE
+              type: varchar(255)
+            - name: CORRECTED_POSTAL_CODE
+              type: varchar(255)
+            - name: ORIGINAL_COT
+              type: varchar(255)
+            - name: HIBCC_COT
+              type: varchar(255)
+            - name: DEA_COT
+              type: varchar(255)
+            - name: RODB_COT
+              type: varchar(255)
+            - name: CORRECTED_COT
+              type: varchar(255)
+            - name: Modified
+              type: tinyint(1)
+
+        - name: GPO_CUST_HDR
+          row_count: 1405
+          domain: customer_upload
+          description: >
+            BATCH HEADER — one row per uploaded batch and the hub of the whole pipeline. BATCH_NUM is the correlation key used by every other pipeline table. Holds boolean completion flags (HIN_VALIDATED, DEA_VALIDATED, USPS_VALIDATED, COT_VALIDATED, HRSA_VALIDATED, MEMBER_VALIDATED, isOutputGenerated; 0=not done, 1=done), record counts (TOTAL_RECORDS, VALID_RECORDS, ERROR_RECORDS) and CURRENT_ACTION, the stage the batch is sitting at. Also serves the read-only Execution History view.
+          columns:
+            - name: BATCH_NUM
+              type: int
+              key: primary
+            - name: FILE_NAME
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: HIN_VALIDATED
+              type: tinyint(1)
+            - name: DEA_VALIDATED
+              type: tinyint(1)
+            - name: USPS_VALIDATED
+              type: tinyint(1)
+            - name: COT_VALIDATED
+              type: tinyint(1)
+            - name: HRSA_VALIDATED
+              type: tinyint(1)
+            - name: MEMBER_VALIDATED
+              type: tinyint(1)
+            - name: VALIDATION_TYPE
+              type: varchar(255)
+            - name: isOutputGenerated
+              type: tinyint(1)
+            - name: GPO
+              type: varchar(255)
+            - name: TOTAL_RECORDS
+              type: int
+            - name: VALID_RECORDS
+              type: int
+            - name: ERROR_RECORDS
+              type: int
+            - name: CURRENT_ACTION
+              type: varchar(50)
+
+        - name: GPO_CUST_INPUT
+          row_count: 437792
+          domain: customer_upload
+          description: >
+            Standardized customer input for a batch, mapped from GPO_STAGED_INPUT using a GPO_INPUT_FORMAT template. The input side of every validation stage. Large table (~438k rows) — always filter by BATCH_NUM.
+          columns:
+            - name: ID
+              type: int
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+              references: GPO_CUST_HDR.BATCH_NUM
+            - name: NAME
+              type: varchar(255)
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CUSTOMER_TYPE
+              type: varchar(50)
+            - name: HIN
+              type: varchar(255)
+            - name: DEA
+              type: varchar(255)
+            - name: HRSA
+              type: varchar(255)
+            - name: COT
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(50)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(50)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: PRIMARY_TELEPHONE
+              type: varchar(50)
+            - name: DESCRIPTION
+              type: text
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: COMMENTS
+              type: text
+            - name: SOLD_TO_STREET
+              type: varchar(255)
+            - name: SOLD_TO_CITY
+              type: varchar(100)
+            - name: SOLD_TO_STATE
+              type: varchar(50)
+            - name: SOLD_TO_POSTAL_CODE
+              type: varchar(20)
+            - name: PARENT_FLAG
+              type: varchar(10)
+            - name: GLN_NUMBER
+              type: varchar(50)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: GRANDPARENT_ID
+              type: varchar(128)
+            - name: PARENT_ID
+              type: varchar(128)
+            - name: CHILD_ID
+              type: varchar(128)
+            - name: GRANDPARENT_NAME
+              type: varchar(256)
+
+        - name: GPO_CUST_OUTPUT
+          row_count: 18212
+          domain: output_processing
+          description: >
+            FINAL output for a batch, formatted via a GPO_OUTPUT_FORMAT template. CORRECTED_* values only. This is the customer-facing deliverable.
+          columns:
+            - name: KEYNUM
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: CORRECTED_HIN
+              type: varchar(255)
+            - name: CORRECTED_DEA
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(50)
+            - name: HIBCC_COT
+              type: varchar(255)
+            - name: DEA_COT
+              type: varchar(255)
+            - name: RODB_COT
+              type: varchar(255)
+            - name: MN_COT
+              type: varchar(255)
+            - name: CORRECTED_STREET
+              type: varchar(255)
+            - name: CORRECTED_CITY
+              type: varchar(100)
+            - name: CORRECTED_STATE
+              type: varchar(50)
+            - name: CORRECTED_POSTAL_CODE
+              type: varchar(20)
+            - name: MEMBER_MATCHING_CRITERIA
+              type: varchar(255)
+            - name: MEMBER_MISMATCH
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: CORRECTED_HRSA
+              type: varchar(255)
+            - name: PLUS_4_CODE
+              type: varchar(10)
+
+        - name: GPO_CUST_STG_OUTPUT
+          row_count: 35010
+          domain: output_processing
+          description: >
+            STAGED (pre-final) output — the merge of all validation results for a batch. Carries both SOURCE_* (as submitted) and CORRECTED_* (validated) values side by side, plus all four COT opinions (HIBCC_COT, SOURCE_COT, DEA_COT, RODB_COT, MN_COT). NOT the final deliverable.
+          columns:
+            - name: KEYNUM
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: SOURCE_HIN
+              type: varchar(255)
+            - name: CORRECTED_HIN
+              type: varchar(255)
+            - name: SOURCE_DEA
+              type: varchar(255)
+            - name: CORRECTED_DEA
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(50)
+            - name: HIBCC_COT
+              type: varchar(255)
+            - name: SOURCE_COT
+              type: varchar(255)
+            - name: DEA_COT
+              type: varchar(255)
+            - name: RODB_COT
+              type: varchar(255)
+            - name: MN_COT
+              type: varchar(255)
+            - name: SOURCE_STREET
+              type: varchar(255)
+            - name: CORRECTED_STREET
+              type: varchar(255)
+            - name: SOURCE_CITY
+              type: varchar(100)
+            - name: CORRECTED_CITY
+              type: varchar(100)
+            - name: SOURCE_STATE
+              type: varchar(50)
+            - name: CORRECTED_STATE
+              type: varchar(50)
+            - name: SOURCE_POSTAL_CODE
+              type: varchar(20)
+            - name: CORRECTED_POSTAL_CODE
+              type: varchar(20)
+            - name: MEMBER_MATCHING_CRITERIA
+              type: varchar(255)
+            - name: MEMBER_MISMATCH
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: SOURCE_HRSA
+              type: varchar(255)
+            - name: CORRECTED_HRSA
+              type: varchar(255)
+            - name: PLUS_4_CODE
+              type: varchar(10)
+
+        - name: GPO_DEA
+          row_count: 1040
+          domain: dea_validation
+          description: >
+            DEA master lookup table. Authoritative NAME/DEA/COT plus address per DEA.
+          columns:
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: ID
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: DEA
+              type: varchar(20)
+            - name: COT
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(255)
+            - name: STATE
+              type: varchar(255)
+            - name: POSTAL_CODE
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_DEA_VALIDATE
+          row_count: 23610
+          domain: dea_validation
+          description: >
+            DEA validation results per batch. Same ORIGINAL_*/UPDATED_* shape as GPO_HIN_VALIDATE; DEA_COT carries the class of trade derived from the DEA match.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_DEA
+              type: varchar(50)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_DEA
+              type: varchar(50)
+            - name: STATUS
+              type: varchar(100)
+            - name: ACTION
+              type: varchar(100)
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: DEA_COT
+              type: varchar(50)
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(512)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: varchar(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(20)
+            - name: UPDATED_STREET
+              type: varchar(512)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: varchar(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(20)
+
+        - name: GPO_HIN
+          row_count: 1042
+          domain: hin_validation
+          description: >
+            HIN master lookup table. Authoritative NAME/HIN/COT plus address per HIN.
+          columns:
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: ID
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: HIN
+              type: varchar(50)
+            - name: STATUS
+              type: varchar(20)
+            - name: COT
+              type: varchar(50)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(255)
+            - name: STATE
+              type: varchar(255)
+            - name: POSTAL_CODE
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_HIN_VALIDATE
+          row_count: 199183
+          domain: hin_validation
+          description: >
+            HIN validation RESULTS per batch. ORIGINAL_* vs UPDATED_* hold the submitted and corrected values. STATUS here is a MATCH OUTCOME code (DUP, SAME, NO, ONE) — NOT a job status. MATCH_TYPE explains how the match was made (exact_match_with_hin, abbreviation_match, similarity_match, no_match, ...). Large table (~199k rows) — always filter by BATCH_NUM.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_HIN
+              type: varchar(50)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_HIN
+              type: varchar(50)
+            - name: HIBCC_COT
+              type: varchar(50)
+            - name: ACTION
+              type: varchar(3)
+            - name: STATUS
+              type: varchar(4)
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(512)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: char(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(10)
+            - name: UPDATED_STREET
+              type: varchar(512)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: char(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(10)
+
+        - name: GPO_HRSA
+          row_count: 1006
+          domain: hrsa_validation
+          description: >
+            HRSA (340B) master lookup table.
+          columns:
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: ID
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: HRSA
+              type: varchar(50)
+            - name: STATUS
+              type: varchar(20)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(255)
+            - name: STATE
+              type: varchar(255)
+            - name: POSTAL_CODE
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_HRSA_VALIDATE
+          row_count: 5287
+          domain: hrsa_validation
+          description: >
+            HRSA validation results per batch, same ORIGINAL_*/UPDATED_* shape as the HIN/DEA validators.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_HRSA
+              type: varchar(50)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_HRSA
+              type: varchar(50)
+            - name: ACTION
+              type: varchar(3)
+            - name: STATUS
+              type: varchar(4)
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(512)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: varchar(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(20)
+            - name: UPDATED_STREET
+              type: varchar(512)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: varchar(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(20)
+
+        - name: GPO_INPUT_FORMAT
+          row_count: 8
+          domain: customer_upload
+          description: >
+            Column-mapping templates (FORMAT_NAME) used to map staged columns into GPO_CUST_INPUT.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: INPUT_FORMAT
+              type: varchar(1028)
+            - name: DEFAULT_FORMAT
+              type: varchar(1028)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: MAIL_DISTRIBUTION
+              type: varchar(512)
+
+        - name: GPO_LOGS
+          row_count: 13606
+          domain: audit_log
+          description: >
+            Central audit trail. Every module inserts a row keyed by BATCH_NUM with USER_ACTION (e.g. 'HIN Validation', 'Upload Member File', 'Output File') and action_desc.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: USER_ACTION
+              type: varchar(255)
+            - name: action_desc
+              type: text
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_MEMBERSHIP_FORMAT
+          row_count: 1
+          domain: configuration
+          description: >
+            Column-mapping templates for membership file uploads.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: INPUT_FORMAT
+              type: varchar(2048)
+            - name: DEFAULT_FORMAT
+              type: varchar(2048)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_MEMBERSHIP_HDR
+          row_count: 1
+          domain: configuration
+          description: >
+            Membership file upload header (FILE_NAME, NO_OF_RECORDS, FORMAT_NAME).
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FILE_NAME
+              type: varchar(255)
+            - name: NO_OF_RECORDS
+              type: bigint
+            - name: FORMAT_NAME
+              type: varchar(100)
+            - name: CREATED_BY
+              type: varchar(100)
+            - name: MODIFIED_BY
+              type: varchar(100)
+            - name: CREATED_AT
+              type: datetime
+            - name: MODIFIED_AT
+              type: datetime
+
+        - name: GPO_MEMBERSHIP_HEIRARCHY
+          row_count: 1686
+          domain: configuration
+          description: >
+            GPO membership hierarchy: GPO_ID/GPO_NAME with GRAND_PARENT, PARENT and CHILD id/name pairs. Note the spelling 'HEIRARCHY' in the table name.
+          columns:
+            - name: ID
+              type: bigint
+              key: primary
+            - name: GPO_ID
+              type: varchar(128)
+            - name: GPO_NAME
+              type: varchar(1024)
+            - name: GRAND_PARENT_ID
+              type: varchar(128)
+            - name: GRAND_PARENT_NAME
+              type: varchar(1024)
+            - name: PARENT_ID
+              type: varchar(128)
+            - name: PARENT_NAME
+              type: varchar(1024)
+            - name: CHILD_ID
+              type: varchar(128)
+            - name: CHILD_NAME
+              type: varchar(1024)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_MEMBER_VALIDATE
+          row_count: 30387
+          domain: member_validation
+          description: >
+            Membership matching and identifier/address completeness results, keyed by BATCH_NUM + NAME. STATUS values are match outcomes (Same, One, New, No). MATCHING_CRITERIA explains the match ('Exact Match', 'HIN Match', 'DEA Match', 'New Identifier(s)', 'No Match(Missing info on the Roster)').
+          columns:
+            - name: ID
+              type: bigint
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: HIN
+              type: varchar(50)
+            - name: DEA
+              type: varchar(50)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: varchar(100)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: HIN_STATUS
+              type: varchar(50)
+            - name: DEA_STATUS
+              type: varchar(50)
+            - name: STATUS
+              type: varchar(50)
+            - name: MATCHING_CRITERIA
+              type: varchar(255)
+            - name: MISMATCH
+              type: varchar(255)
+            - name: CREATED_BY
+              type: varchar(100)
+            - name: CREATED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(100)
+            - name: LASTMOD
+              type: datetime
+
+        - name: GPO_OUTPUT_FORMAT
+          row_count: 8
+          domain: output_processing
+          description: >
+            Output formatting templates (FORMAT_NAME, PARAMETERS) applied when generating GPO_CUST_OUTPUT.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: PARAMETERS
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_ROLE_MAPPING
+          row_count: 26
+          domain: rbac_security
+          description: >
+            GPO_ROLE_MAPPING table.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: USER_ID
+              type: varchar(255)
+            - name: USERNAME
+              type: varchar(255)
+            - name: ROLE_ID
+              type: int
+              references: GPO_ROLE_MASTER.ROLE_ID
+            - name: ASSIGNED_DATE
+              type: datetime
+            - name: STATUS
+              type: varchar(255)
+            - name: EMAIL
+              type: varchar(255)
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+
+        - name: GPO_ROLE_MASTER
+          row_count: 5
+          domain: rbac_security
+          description: >
+            GPO_ROLE_MASTER table.
+          columns:
+            - name: ROLE_ID
+              type: int
+              key: primary
+            - name: ROLE
+              type: varchar(100)
+            - name: DESCRIPTION
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: STATUS
+              type: varchar(255)
+
+        - name: GPO_ROLE_PERMISSION
+          row_count: 5
+          domain: rbac_security
+          description: >
+            GPO_ROLE_PERMISSION table.
+          columns:
+            - name: PERMISSION_ID
+              type: int
+              key: primary
+            - name: ROLE_ID
+              type: int
+              references: GPO_ROLE_MASTER.ROLE_ID
+            - name: CAN_VIEW
+              type: tinyint(1)
+            - name: CAN_ADD
+              type: tinyint(1)
+            - name: CAN_EDIT
+              type: tinyint(1)
+            - name: CAN_DELETE
+              type: tinyint(1)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+
+        - name: GPO_STAGED_INPUT
+          row_count: 483249
+          domain: customer_upload
+          description: >
+            Raw uploaded rows exactly as received, keyed by BATCH_NUM. VERY WIDE (200 generic columns) and large — never SELECT *; always name columns and filter by BATCH_NUM.
+          columns:
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: S.No
+              type: text
+            - name: Parent Name
+              type: text
+            - name: Customer Type
+              type: text
+            - name: HIN
+              type: text
+            - name: DEA
+              type: text
+            - name: COT
+              type: text
+            - name: Status
+              type: text
+            - name: Street
+              type: text
+            - name: City
+              type: text
+            - name: State
+              type: text
+            - name: Postal Code
+              type: text
+            - name: Primary Telephone
+              type: text
+            - name: Description
+              type: text
+            - name: Start Date
+              type: text
+            - name: End Date
+              type: text
+            - name: Comments
+              type: text
+            - name: Sold To Street
+              type: text
+            - name: Sold To City
+              type: text
+            - name: Sold To State
+              type: text
+            - name: Sold To Postal Code
+              type: text
+            - name: Parent Flag
+              type: text
+            - name: GLN Number
+              type: text
+            - name: Validated HIN
+              type: text
+            - name: Validated DEA
+              type: text
+            - name: HibccCot
+              type: text
+            - name: DEA COT
+              type: text
+            - name: RODB COT
+              type: text
+            - name: Final COT
+              type: text
+            - name: Validated Street
+              type: text
+            - name: Validated City
+              type: text
+            - name: Validated State
+              type: text
+            - name: Validated Postal Code
+              type: text
+            - name: HRSA
+              type: text
+          # +160 further columns not listed here —
+          # call describe_table('GPO_STAGED_INPUT') for the complete list.
+
+        - name: GPO_USER_LOGIN
+          row_count: 2233
+          domain: rbac_security
+          description: >
+            GPO_USER_LOGIN table.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: USER_ID
+              type: varchar(255)
+              references: GPO_ROLE_MAPPING.USER_ID
+            - name: ACCESS_TOKEN
+              type: longtext
+            - name: REFRESH_TOKEN
+              type: longtext
+            - name: EXPIRES_ON
+              type: int
+            - name: EXPIRES_IN
+              type: int
+            - name: TOKEN_TYPE
+              type: varchar(50)
+            - name: LOGIN_TIME
+              type: datetime
+            - name: EXPIRY_TIME
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: STATUS
+              type: varchar(255)
+
+        - name: GPO_USPS
+          row_count: 40
+          domain: address_validation
+          description: >
+            USPS address master lookup table.
+          columns:
+            - name: KEY_NUM
+              type: int
+              key: primary
+            - name: ID
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: CITY
+              type: varchar(100)
+            - name: STATE
+              type: char(2)
+            - name: POSTAL_CODE
+              type: varchar(10)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: GPO_USPS_VALIDATE
+          row_count: 8001
+          domain: address_validation
+          description: >
+            USPS address validation/correction results per batch. ORIGINAL_* vs UPDATED_* address fields plus PLUS_4_CODE. ACTION values: NEW, ORG, USR.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(255)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: char(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(10)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_STREET
+              type: varchar(255)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: char(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(10)
+            - name: ACTION
+              type: varchar(100)
+            - name: ID
+              type: int
+              key: primary
+            - name: STATUS
+              type: varchar(100)
+            - name: BATCH_NUM
+              type: int
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: PLUS_4_CODE
+              type: varchar(10)
+
+        - name: GPO_VALIDATION_JOBS
+          row_count: 1045
+          domain: job_tracking
+          description: >
+            PER-STAGE JOB STATUS for a batch — one row per BATCH_NUM. STATUS is the overall job state; MEMBER_STATUS, HIN_STATUS, DEA_STATUS, USPS_STATUS, COT_STATUS, HRSA_STATUS, STG_STATUS and OUTPUT_STATUS are the individual stage states. THIS is where 'failed' or 'pending' stages live — not in the *_VALIDATE tables.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(255)
+            - name: MEMBER_STATUS
+              type: varchar(255)
+            - name: HIN_STATUS
+              type: varchar(255)
+            - name: DEA_STATUS
+              type: varchar(255)
+            - name: USPS_STATUS
+              type: varchar(255)
+            - name: COT_STATUS
+              type: varchar(255)
+            - name: HRSA_STATUS
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: OUTPUT_STATUS
+              type: varchar(255)
+            - name: STG_STATUS
+              type: varchar(255)
+            - name: PROCESSING_TIME
+              type: int
+
+        - name: MAIL_MONITOR
+          row_count: 2
+          domain: reference_data
+          description: >
+            Tracks batches picked up from the mail channel (BATCH_NUM, FILE_NAME).
+          columns:
+            - name: BATCH_NUM
+              type: int
+              key: primary
+            - name: FILE_NAME
+              type: varchar(255)
+
+        - name: MN_CF_ELIGIBLE_CUSTOMER
+          row_count: 31
+          domain: membership_contract
+          description: >
+            Eligible-customer records per member, with eligibility window and IS_LATEST_ELIGIBILITY flag.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: ELIGIBLE_CUSTOMER_ID
+              type: bigint
+            - name: MEMBER_ID
+              type: bigint
+              references: MN_MEMBER.MEMBER_ID
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: INC_FLAG
+              type: tinyint
+            - name: DATE_CREATED
+              type: timestamp
+            - name: MEMBER_ID_CREATED
+              type: varchar(55)
+            - name: DATE_UPDATED
+              type: timestamp
+            - name: MEMBER_ID_UPDATED
+              type: varchar(55)
+            - name: ROOT_SRC_ID
+              type: bigint
+            - name: SRC_ID
+              type: bigint
+            - name: IS_LATEST_ELIGIBILITY
+              type: tinyint
+
+        - name: MN_MEMBER
+          row_count: 31
+          domain: membership_contract
+          description: >
+            MEMBERSHIP HUB — one row per member (MEMBER_ID, MEMBER_NAME, MEMBER_GRP_NAME).
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: MEMBER_ID
+              type: bigint
+            - name: MEMBER_NAME
+              type: varchar(100)
+            - name: MEMBER_GRP_NAME
+              type: varchar(150)
+            - name: DATE_CREATED
+              type: timestamp
+            - name: MEMBER_ID_CREATED
+              type: varchar(55)
+
+        - name: MN_ORGANIZATION_ID
+          row_count: 72
+          domain: membership_contract
+          description: >
+            Organization identifiers belonging to a member (TYPE, IDENTIFIER, PRIMARY_FLAG). Many per MEMBER_ID.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: ORG_ID_ID
+              type: bigint
+            - name: TYPE
+              type: varchar(100)
+            - name: PRIMARY_FLAG
+              type: tinyint
+            - name: IDENTIFIER
+              type: varchar(100)
+            - name: START_DATE
+              type: date
+            - name: MEMBER_ID
+              type: bigint
+              references: MN_MEMBER.MEMBER_ID
+            - name: DATE_CREATED
+              type: timestamp
+            - name: MEMBER_ID_CREATED
+              type: varchar(55)
+            - name: DATE_UPDATED
+              type: timestamp
+            - name: MEMBER_ID_UPDATED
+              type: varchar(55)
+            - name: END_DATE
+              type: date
+
+        - name: MN_ORGANIZATION_ID_ASTELLAS
+          row_count: 72
+          domain: membership_contract
+          description: >
+            Astellas-specific copy of MN_ORGANIZATION_ID with the same shape. Use only when the question names Astellas.
+          columns:
+            - name: ID
+              type: int
+            - name: ORG_ID_ID
+              type: bigint
+            - name: TYPE
+              type: varchar(100)
+            - name: PRIMARY_FLAG
+              type: tinyint
+            - name: IDENTIFIER
+              type: varchar(100)
+            - name: START_DATE
+              type: date
+            - name: MEMBER_ID
+              type: bigint
+            - name: DATE_CREATED
+              type: timestamp
+            - name: MEMBER_ID_CREATED
+              type: varchar(55)
+            - name: DATE_UPDATED
+              type: timestamp
+            - name: MEMBER_ID_UPDATED
+              type: varchar(55)
+            - name: END_DATE
+              type: date
+
+        - name: MN_STRUCTURED_CONTRACT
+          row_count: 31
+          domain: membership_contract
+          description: >
+            Structured contracts belonging to a document. Many per STRUCT_DOC_ID. Carries CTRT_DOC_STATUS, contract type/sub-type and approval/implementation dates.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: STRUCT_CTRT_ID
+              type: bigint
+            - name: STRUCT_DOC_ID
+              type: bigint
+              references: MN_STRUCTURED_DOC.STRUCT_DOC_ID
+            - name: CTRT_DOC_STATUS
+              type: varchar(100)
+            - name: STRUCT_DOC_TYPE
+              type: varchar(100)
+            - name: CTRT_SUB_TYPE
+              type: varchar(100)
+            - name: DIRECT_INDIRECT_TYPE
+              type: varchar(100)
+            - name: CTRT_DOC_DOMAIN
+              type: varchar(100)
+            - name: CONTRACT_TERM
+              type: int
+            - name: MEMBER_ID_CUST
+              type: bigint
+            - name: ORG_UNIT_ID
+              type: bigint
+            - name: EFFECTIVE_TIMEZONE
+              type: varchar(100)
+            - name: DATE_CREATED
+              type: timestamp
+            - name: MEMBER_ID_CREATED
+              type: varchar(55)
+            - name: DATE_UPDATED
+              type: timestamp
+            - name: MEMBER_ID_UPDATED
+              type: varchar(55)
+            - name: DATE_APPROVED
+              type: date
+            - name: DATE_IMPLEMENTED
+              type: date
+
+        - name: MN_STRUCTURED_DOC
+          row_count: 31
+          domain: membership_contract
+          description: >
+            CONTRACT DOCUMENT HUB — one row per structured document (STRUCT_DOC_ID, STRUCT_DOC_NAME, validity window).
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: STRUCT_DOC_ID
+              type: bigint
+            - name: STRUCT_DOC_NAME
+              type: varchar(100)
+            - name: STRUCT_DOC_ID_NUM
+              type: varchar(100)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: LOCALE
+              type: varchar(100)
+            - name: CURRENCY
+              type: varchar(100)
+            - name: ORG_UNIT_ID
+              type: bigint
+            - name: EFFECTIVE_TIMEZONE
+              type: varchar(100)
+            - name: DATE_CREATED
+              type: timestamp
+            - name: MEMBER_ID_CREATED
+              type: varchar(55)
+            - name: DATE_UPDATED
+              type: timestamp
+            - name: MEMBER_ID_UPDATED
+              type: varchar(55)
+
+        - name: REG_CUST_HDR
+          row_count: 62
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: KEY_NUM
+              type: int
+            - name: BATCH_NUM
+              type: int
+            - name: FILE_NAME
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: HIN_VALIDATED
+              type: tinyint(1)
+            - name: DEA_VALIDATED
+              type: tinyint(1)
+            - name: USPS_VALIDATED
+              type: tinyint(1)
+            - name: COT_VALIDATED
+              type: tinyint(1)
+            - name: HRSA_VALIDATED
+              type: tinyint(1)
+            - name: VALIDATION_TYPE
+              type: varchar(255)
+            - name: isOutputGenerated
+              type: tinyint(1)
+            - name: GPO
+              type: varchar(255)
+            - name: TOTAL_RECORDS
+              type: int
+            - name: VALID_RECORDS
+              type: int
+            - name: ERROR_RECORDS
+              type: int
+            - name: CURRENT_ACTION
+              type: varchar(50)
+
+        - name: REG_CUST_INPUT
+          row_count: 360
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: KEY_NUM
+              type: int
+            - name: BATCH_NUM
+              type: int
+            - name: GPO_NAME
+              type: varchar(255)
+            - name: GPO_CONTRACT_ID
+              type: varchar(255)
+            - name: LOC_ID
+              type: varchar(255)
+            - name: REG_ID
+              type: varchar(255)
+            - name: PARENT_CHILD_IND
+              type: varchar(255)
+            - name: PARENT_ID
+              type: int
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CUSTOMER_ID
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: CUSTOMER_NAME2
+              type: varchar(255)
+            - name: STREET
+              type: varchar(255)
+            - name: ADDRESS_LINE_2
+              type: varchar(255)
+            - name: CITY
+              type: varchar(255)
+            - name: STATE
+              type: varchar(255)
+            - name: POSTAL_CODE
+              type: varchar(20)
+            - name: PHYSICIAN_NAME
+              type: varchar(255)
+            - name: ASSOCIATED_PRODUCT_NUM
+              type: varchar(255)
+            - name: IMS_ORG_ID
+              type: varchar(255)
+            - name: COT
+              type: varchar(255)
+            - name: COT_DESCRIPTION
+              type: varchar(255)
+            - name: DEA
+              type: varchar(255)
+            - name: HIN
+              type: varchar(255)
+            - name: GPO_ENROLLMENT_DATE
+              type: date
+            - name: GPO_ENROLLMENT_END_DATE
+              type: date
+            - name: IS_CONTRACT_ELIGIBLE
+              type: varchar(255)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: INTERNAL_COMMENT
+              type: text
+            - name: PARENT_CHILD_HIERARCHY_COMMENT
+              type: text
+            - name: ROSTER_CHANGE_DATE
+              type: date
+            - name: CHANGE_TO_THE_ROSTER
+              type: varchar(255)
+            - name: ELIGIBILITY_COMMENTS
+              type: text
+            - name: OLD_HIN_NUMBERS
+              type: varchar(255)
+            - name: PARENT_ID_NON_PE
+              type: int
+            - name: PARENT_NAME_NON_PE
+              type: varchar(255)
+            - name: NOTES
+              type: text
+            - name: CREATED_DATE
+              type: datetime
+          # +3 further columns not listed here —
+          # call describe_table('REG_CUST_INPUT') for the complete list.
+
+        - name: REG_CUST_OUTPUT
+          row_count: 114
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: KEY_NUM
+              type: int
+            - name: BATCH_NUM
+              type: int
+            - name: GPO_NAME
+              type: varchar(255)
+            - name: GPO_CONTRACT_ID
+              type: varchar(50)
+            - name: LOC_ID
+              type: varchar(50)
+            - name: REG_ID
+              type: varchar(50)
+            - name: PARENT_CHILD_IND
+              type: varchar(50)
+            - name: PARENT_ID
+              type: int
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CUSTOMER_ID
+              type: int
+            - name: CUSTOMER_NAME
+              type: varchar(255)
+            - name: CUSTOMER_NAME2
+              type: varchar(255)
+            - name: CORRECTED_STREET
+              type: varchar(255)
+            - name: ADDRESS_LINE_2
+              type: varchar(255)
+            - name: CORRECTED_CITY
+              type: varchar(100)
+            - name: CORRECTED_STATE
+              type: char(2)
+            - name: CORRECTED_POSTAL_CODE
+              type: varchar(20)
+            - name: PHYSICIAN_NAME
+              type: varchar(255)
+            - name: ASSOCIATED_PRODUCT_NUM
+              type: varchar(50)
+            - name: IMS_ORG_ID
+              type: varchar(50)
+            - name: COT_CODE
+              type: varchar(50)
+            - name: COT_DESCRIPTION
+              type: varchar(255)
+            - name: CORRECTED_HIN
+              type: varchar(50)
+            - name: CORRECTED_DEA
+              type: varchar(50)
+            - name: GPO_ENROLLMENT_DATE
+              type: date
+            - name: GPO_ENROLLMENT_END_DATE
+              type: date
+            - name: IS_CONTRACT_ELIGIBLE
+              type: char(1)
+            - name: CONTRACT_ELIG_START_DATE
+              type: date
+            - name: CONTRACT_ELIG_END_DATE
+              type: date
+            - name: INTERNAL_COMMENT
+              type: text
+            - name: PARENT_CHILD_HIERARCHY_COMMENT
+              type: text
+            - name: CREATED_DATE
+              type: timestamp
+            - name: CREATED_BY
+              type: varchar(100)
+            - name: LASTMOD
+              type: timestamp
+            - name: MODIFIED_BY
+              type: varchar(100)
+
+        - name: REG_CUST_STG_OUTPUT
+          row_count: 215
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: KEYNUM
+              type: int
+            - name: BATCH_NUM
+              type: int
+            - name: NAME
+              type: varchar(255)
+            - name: SOURCE_HIN
+              type: varchar(255)
+            - name: CORRECTED_HIN
+              type: varchar(255)
+            - name: SOURCE_DEA
+              type: varchar(255)
+            - name: CORRECTED_DEA
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(50)
+            - name: HIBCC_COT
+              type: varchar(255)
+            - name: SOURCE_COT
+              type: varchar(255)
+            - name: DEA_COT
+              type: varchar(255)
+            - name: RODB_COT
+              type: varchar(255)
+            - name: MN_COT
+              type: varchar(255)
+            - name: SOURCE_STREET
+              type: varchar(255)
+            - name: CORRECTED_STREET
+              type: varchar(255)
+            - name: SOURCE_CITY
+              type: varchar(100)
+            - name: CORRECTED_CITY
+              type: varchar(100)
+            - name: SOURCE_STATE
+              type: varchar(50)
+            - name: CORRECTED_STATE
+              type: varchar(50)
+            - name: SOURCE_POSTAL_CODE
+              type: varchar(20)
+            - name: CORRECTED_POSTAL_CODE
+              type: varchar(20)
+            - name: START_DATE
+              type: date
+            - name: END_DATE
+              type: date
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: SOURCE_HRSA
+              type: varchar(255)
+            - name: CORRECTED_HRSA
+              type: varchar(255)
+            - name: PLUS_4_CODE
+              type: varchar(10)
+
+        - name: REG_DEA_VALIDATE
+          row_count: 376
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_DEA
+              type: varchar(50)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_DEA
+              type: varchar(50)
+            - name: STATUS
+              type: varchar(100)
+            - name: ACTION
+              type: varchar(100)
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: DEA_COT
+              type: varchar(50)
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(512)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: varchar(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(20)
+            - name: UPDATED_STREET
+              type: varchar(512)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: varchar(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(20)
+
+        - name: REG_HIN_VALIDATE
+          row_count: 424
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_HIN
+              type: varchar(50)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_HIN
+              type: varchar(50)
+            - name: HIBCC_COT
+              type: varchar(50)
+            - name: ACTION
+              type: varchar(3)
+            - name: STATUS
+              type: varchar(4)
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(512)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: char(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(10)
+            - name: UPDATED_STREET
+              type: varchar(512)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: char(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(10)
+
+        - name: REG_INPUT_FORMAT
+          row_count: 1
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: INPUT_FORMAT
+              type: varchar(1028)
+            - name: DEFAULT_FORMAT
+              type: varchar(1028)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: MAIL_DISTRIBUTION
+              type: varchar(512)
+
+        - name: REG_LOGS
+          row_count: 449
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: int
+            - name: USER_ACTION
+              type: varchar(255)
+            - name: action_desc
+              type: text
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: REG_OUTPUT_FORMAT
+          row_count: 1
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: PARAMETERS
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: REG_REPORT_FORMAT
+          row_count: 1
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: FORMAT_NAME
+              type: varchar(255)
+            - name: PARAMETERS
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+
+        - name: REG_STAGED_INPUT
+          row_count: 372
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: KEY_NUM
+              type: int
+            - name: BATCH_NUM
+              type: int
+            - name: GPO_NAME
+              type: varchar(255)
+            - name: GPO_CONTRACT_ID
+              type: varchar(255)
+            - name: LOC_ID
+              type: varchar(255)
+            - name: REG_ID
+              type: varchar(255)
+            - name: PARENT_CHILD_IND
+              type: varchar(255)
+            - name: PARENT_ID
+              type: int
+            - name: PARENT_NAME
+              type: varchar(255)
+            - name: CUSTOMER_ID
+              type: int
+            - name: CUSTOMER_NAME
+              type: varchar(255)
+            - name: CUSTOMER_NAME2
+              type: varchar(255)
+            - name: ADDRESS_LINE_1
+              type: varchar(255)
+            - name: ADDRESS_LINE_2
+              type: varchar(255)
+            - name: CITY
+              type: varchar(255)
+            - name: STATE
+              type: varchar(255)
+            - name: ZIP
+              type: varchar(20)
+            - name: PHYSICIAN_NAME
+              type: varchar(255)
+            - name: ASSOCIATED_PRODUCT_NUM
+              type: varchar(255)
+            - name: IMS_ORG_ID
+              type: varchar(255)
+            - name: COT_CODE
+              type: varchar(255)
+            - name: COT_DESCRIPTION
+              type: varchar(255)
+            - name: DEA_NUM
+              type: varchar(255)
+            - name: HIN_NUM
+              type: varchar(255)
+            - name: GPO_ENROLLMENT_DATE
+              type: date
+            - name: GPO_ENROLLMENT_END_DATE
+              type: date
+            - name: IS_CONTRACT_ELIGIBLE
+              type: varchar(255)
+            - name: CONTRACT_ELIG_START_DATE
+              type: date
+            - name: CONTRACT_ELIG_END_DATE
+              type: date
+            - name: INTERNAL_COMMENT
+              type: text
+            - name: PARENT_CHILD_HIERARCHY_COMMENT
+              type: text
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: LASTMOD
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: GPO_CONTRACT_ID _8mg (EYLEA HD)
+              type: text
+            - name: GPO_CONTRACT_ID _2mg (EYLEA)
+              type: text
+            - name: CONTRACT_ELIG_START_DATE (EYLEA 2mg)
+              type: text
+            - name: CONTRACT_ELIG_START_DATE (EYLEA HD)
+              type: text
+          # +71 further columns not listed here —
+          # call describe_table('REG_STAGED_INPUT') for the complete list.
+
+        - name: REG_USPS_VALIDATE
+          row_count: 336
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ORIGINAL_NAME
+              type: varchar(255)
+            - name: ORIGINAL_STREET
+              type: varchar(255)
+            - name: ORIGINAL_CITY
+              type: varchar(100)
+            - name: ORIGINAL_STATE
+              type: char(2)
+            - name: ORIGINAL_POSTAL_CODE
+              type: varchar(10)
+            - name: UPDATED_NAME
+              type: varchar(255)
+            - name: UPDATED_STREET
+              type: varchar(255)
+            - name: UPDATED_CITY
+              type: varchar(100)
+            - name: UPDATED_STATE
+              type: char(2)
+            - name: UPDATED_POSTAL_CODE
+              type: varchar(10)
+            - name: ACTION
+              type: varchar(100)
+            - name: ID
+              type: int
+              key: primary
+            - name: STATUS
+              type: varchar(100)
+            - name: BATCH_NUM
+              type: int
+            - name: MATCH_TYPE
+              type: varchar(50)
+            - name: SIMILARITY_SCORE
+              type: float
+            - name: MATCHED_FIELDS
+              type: varchar(255)
+            - name: PLUS_4_CODE
+              type: varchar(10)
+
+        - name: REG_VALIDATION_JOBS
+          row_count: 63
+          domain: program_reg
+          description: >
+            REG program pipeline table — mirrors the equivalent GPO_* table for the REG program only.
+          columns:
+            - name: ID
+              type: int
+              key: primary
+            - name: BATCH_NUM
+              type: varchar(255)
+            - name: STATUS
+              type: varchar(255)
+            - name: HIN_STATUS
+              type: varchar(255)
+            - name: DEA_STATUS
+              type: varchar(255)
+            - name: USPS_STATUS
+              type: varchar(255)
+            - name: COT_STATUS
+              type: varchar(255)
+            - name: HRSA_STATUS
+              type: varchar(255)
+            - name: CREATED_DATE
+              type: datetime
+            - name: CREATED_BY
+              type: varchar(255)
+            - name: MODIFIED_DATE
+              type: datetime
+            - name: MODIFIED_BY
+              type: varchar(255)
+            - name: OUTPUT_STATUS
+              type: varchar(255)
+            - name: STG_STATUS
+              type: varchar(255)
+            - name: PROCESSING_TIME
+              type: int
+
+        - name: TTBC
+          row_count: 20
+          domain: reference_data
+          description: >
+            Text/message component reference table joining MSG_NUM to component codes.
+          columns:
+            - name: TXT_TBC_CDE
+              type: varchar(30)
+            - name: MSG_NUM
+              type: bigint
+            - name: COMPONENT_CD
+              type: varchar(30)
+
+  # ============================================================
+  # JOIN PATHS
+  # 7 are declared foreign keys; the BATCH_NUM and master-lookup
+  # paths are the documented pipeline flow.
+  # ============================================================
+  joins:
+    - name: rbac_role_to_permission
+      left_table: GPO_ROLE_PERMISSION
+      right_table: GPO_ROLE_MASTER
+      join_condition: "GPO_ROLE_PERMISSION.ROLE_ID = GPO_ROLE_MASTER.ROLE_ID"
+      description: "Declared FK. CRUD permissions (CAN_VIEW/CAN_ADD/CAN_EDIT/CAN_DELETE) for a role."
+    - name: rbac_role_to_mapping
+      left_table: GPO_ROLE_MAPPING
+      right_table: GPO_ROLE_MASTER
+      join_condition: "GPO_ROLE_MAPPING.ROLE_ID = GPO_ROLE_MASTER.ROLE_ID"
+      description: "Declared FK. Which users are assigned a role."
+    - name: rbac_mapping_to_login
+      left_table: GPO_USER_LOGIN
+      right_table: GPO_ROLE_MAPPING
+      join_condition: "GPO_USER_LOGIN.USER_ID = GPO_ROLE_MAPPING.USER_ID"
+      description: "Declared FK. Login/token sessions for a mapped user."
+    - name: member_to_org_id
+      left_table: MN_ORGANIZATION_ID
+      right_table: MN_MEMBER
+      join_condition: "MN_ORGANIZATION_ID.MEMBER_ID = MN_MEMBER.MEMBER_ID"
+      description: "Declared FK. One member has many organization identifiers."
+    - name: member_to_eligible_customer
+      left_table: MN_CF_ELIGIBLE_CUSTOMER
+      right_table: MN_MEMBER
+      join_condition: "MN_CF_ELIGIBLE_CUSTOMER.MEMBER_ID = MN_MEMBER.MEMBER_ID"
+      description: "Declared FK. One member has many eligible-customer records."
+    - name: doc_to_contract
+      left_table: MN_STRUCTURED_CONTRACT
+      right_table: MN_STRUCTURED_DOC
+      join_condition: "MN_STRUCTURED_CONTRACT.STRUCT_DOC_ID = MN_STRUCTURED_DOC.STRUCT_DOC_ID"
+      description: "Declared FK. One structured document has many structured contracts."
+    - name: hdr_to_input
+      left_table: GPO_CUST_INPUT
+      right_table: GPO_CUST_HDR
+      join_condition: "GPO_CUST_INPUT.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Declared FK. Standardized input rows for a batch."
+    - name: hdr_to_staged
+      left_table: GPO_STAGED_INPUT
+      right_table: GPO_CUST_HDR
+      join_condition: "GPO_STAGED_INPUT.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Raw uploaded rows for a batch."
+    - name: hdr_to_jobs
+      left_table: GPO_VALIDATION_JOBS
+      right_table: GPO_CUST_HDR
+      join_condition: "GPO_VALIDATION_JOBS.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Per-stage job status for a batch."
+    - name: hdr_to_logs
+      left_table: GPO_LOGS
+      right_table: GPO_CUST_HDR
+      join_condition: "GPO_LOGS.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Audit rows for a batch."
+    - name: hdr_to_stg_output
+      left_table: GPO_CUST_STG_OUTPUT
+      right_table: GPO_CUST_HDR
+      join_condition: "GPO_CUST_STG_OUTPUT.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Staged (pre-final) merged output for a batch."
+    - name: hdr_to_output
+      left_table: GPO_CUST_OUTPUT
+      right_table: GPO_CUST_HDR
+      join_condition: "GPO_CUST_OUTPUT.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Final formatted output for a batch."
+    - name: hdr_to_mail_monitor
+      left_table: MAIL_MONITOR
+      right_table: GPO_CUST_HDR
+      join_condition: "MAIL_MONITOR.BATCH_NUM = GPO_CUST_HDR.BATCH_NUM"
+      description: "Batches that arrived via the mail channel."
+    - name: input_to_hin_validate
+      left_table: GPO_HIN_VALIDATE
+      right_table: GPO_CUST_INPUT
+      join_condition: "GPO_HIN_VALIDATE.BATCH_NUM = GPO_CUST_INPUT.BATCH_NUM AND GPO_HIN_VALIDATE.ORIGINAL_HIN = GPO_CUST_INPUT.HIN"
+      description: "HIN validation outcome for an input row."
+    - name: input_to_dea_validate
+      left_table: GPO_DEA_VALIDATE
+      right_table: GPO_CUST_INPUT
+      join_condition: "GPO_DEA_VALIDATE.BATCH_NUM = GPO_CUST_INPUT.BATCH_NUM AND GPO_DEA_VALIDATE.ORIGINAL_DEA = GPO_CUST_INPUT.DEA"
+      description: "DEA validation outcome for an input row."
+    - name: input_to_hrsa_validate
+      left_table: GPO_HRSA_VALIDATE
+      right_table: GPO_CUST_INPUT
+      join_condition: "GPO_HRSA_VALIDATE.BATCH_NUM = GPO_CUST_INPUT.BATCH_NUM AND GPO_HRSA_VALIDATE.ORIGINAL_HRSA = GPO_CUST_INPUT.HRSA"
+      description: "HRSA validation outcome for an input row."
+    - name: input_to_usps_validate
+      left_table: GPO_USPS_VALIDATE
+      right_table: GPO_CUST_INPUT
+      join_condition: "GPO_USPS_VALIDATE.BATCH_NUM = GPO_CUST_INPUT.BATCH_NUM AND GPO_USPS_VALIDATE.ORIGINAL_NAME = GPO_CUST_INPUT.NAME"
+      description: "USPS address validation outcome for an input row."
+    - name: input_to_cot_validate
+      left_table: GPO_COT_VALIDATE
+      right_table: GPO_CUST_INPUT
+      join_condition: "GPO_COT_VALIDATE.BATCH_NUM = GPO_CUST_INPUT.BATCH_NUM AND GPO_COT_VALIDATE.CUSTOMER_NAME = GPO_CUST_INPUT.NAME"
+      description: "Class-of-Trade outcome for an input row."
+    - name: input_to_member_validate
+      left_table: GPO_MEMBER_VALIDATE
+      right_table: GPO_CUST_INPUT
+      join_condition: "GPO_MEMBER_VALIDATE.BATCH_NUM = GPO_CUST_INPUT.BATCH_NUM AND GPO_MEMBER_VALIDATE.NAME = GPO_CUST_INPUT.NAME"
+      description: "Membership matching outcome for an input row."
+    - name: hin_validate_to_master
+      left_table: GPO_HIN_VALIDATE
+      right_table: GPO_HIN
+      join_condition: "GPO_HIN_VALIDATE.UPDATED_HIN = GPO_HIN.HIN"
+      description: "Resolves the matched HIN master record (authoritative name/COT/address)."
+    - name: dea_validate_to_master
+      left_table: GPO_DEA_VALIDATE
+      right_table: GPO_DEA
+      join_condition: "GPO_DEA_VALIDATE.UPDATED_DEA = GPO_DEA.DEA"
+      description: "Resolves the matched DEA master record."
+    - name: hrsa_validate_to_master
+      left_table: GPO_HRSA_VALIDATE
+      right_table: GPO_HRSA
+      join_condition: "GPO_HRSA_VALIDATE.UPDATED_HRSA = GPO_HRSA.HRSA"
+      description: "Resolves the matched HRSA master record."
+    - name: stg_output_to_output
+      left_table: GPO_CUST_OUTPUT
+      right_table: GPO_CUST_STG_OUTPUT
+      join_condition: "GPO_CUST_OUTPUT.BATCH_NUM = GPO_CUST_STG_OUTPUT.BATCH_NUM AND GPO_CUST_OUTPUT.KEYNUM = GPO_CUST_STG_OUTPUT.KEYNUM"
+      description: "Final output row and the staged row it came from."
+    - name: display_msg_to_ttbc
+      left_table: TTBC
+      right_table: DISPLAY_MSG
+      join_condition: "TTBC.MSG_NUM = DISPLAY_MSG.MSG_NUM"
+      description: "Message component code to display text."
+
+  # ============================================================
+  # BUSINESS TO DATABASE MAPPING RULES (STRICT)
+  # ============================================================
+  mapping_rules:
+    - category: "Batch correlation key"
+      rule: >
+        BATCH_NUM is THE correlation key for this database. Every pipeline question is scoped to a
+        batch, and GPO_CUST_HDR is the batch header hub. When the user names a batch, filter
+        BATCH_NUM on every table in the query. GPO_CUST_INPUT (~438k rows), GPO_HIN_VALIDATE
+        (~199k rows) and GPO_STAGED_INPUT (~483k rows) MUST always be filtered by BATCH_NUM or
+        another selective predicate — never scan them whole.
+    - category: "Job status vs match status - CRITICAL"
+      rule: >
+        Two different 'STATUS' concepts exist and must never be interchanged.
+        1) PROCESSING / JOB status lives ONLY on GPO_VALIDATION_JOBS: STATUS ('In-Progress',
+        'Completed', 'Failed', 'Cancelled', 'Started', 'Pending', 'Open') and the per-stage
+        columns HIN_STATUS, DEA_STATUS, USPS_STATUS, COT_STATUS, HRSA_STATUS, MEMBER_STATUS,
+        STG_STATUS, OUTPUT_STATUS. Stage values are stored with INCONSISTENT CASING
+        ('pending', 'completed', 'failed', 'In-Progress'), so ALWAYS compare case-insensitively:
+        WHERE LOWER(HIN_STATUS) = 'failed'.
+        2) MATCH OUTCOME status lives on the *_VALIDATE tables and is NOT a job state:
+        GPO_HIN_VALIDATE.STATUS / GPO_DEA_VALIDATE.STATUS / GPO_HRSA_VALIDATE.STATUS use
+        'DUP', 'SAME', 'NO', 'ONE'; GPO_MEMBER_VALIDATE.STATUS uses 'Same', 'One', 'New', 'No'.
+        So 'which batches failed HIN validation' -> GPO_VALIDATION_JOBS.HIN_STATUS, NOT
+        GPO_HIN_VALIDATE.STATUS.
+    - category: "Completion flags vs stage status"
+      rule: >
+        GPO_CUST_HDR carries BOOLEAN completion flags: HIN_VALIDATED, DEA_VALIDATED,
+        USPS_VALIDATED, COT_VALIDATED, HRSA_VALIDATED, MEMBER_VALIDATED, isOutputGenerated
+        (0 = not done, 1 = done). Use these for 'has stage X been done for this batch'.
+        Use GPO_VALIDATION_JOBS.*_STATUS for 'how did stage X end up'. CURRENT_ACTION on
+        GPO_CUST_HDR names the stage the batch is sitting at
+        ('UPLOAD', 'HIN', 'COT', 'HRSA', 'USPS', 'MEMBER', 'FINAL OUTPUT', 'CANCELLED')
+        and is NULL for batches that have not progressed.
+    - category: "Staged output vs final output"
+      rule: >
+        GPO_CUST_STG_OUTPUT is the PRE-FINAL merge (carries both SOURCE_* and CORRECTED_* values);
+        GPO_CUST_OUTPUT is the FINAL customer-facing deliverable (CORRECTED_* only). Never mix them
+        in one answer, and never present staged rows as final output. 'Was output generated?' is
+        answered by GPO_CUST_HDR.isOutputGenerated.
+    - category: "Original vs corrected values"
+      rule: >
+        Validation tables store the submitted value and the corrected value side by side:
+        GPO_HIN_VALIDATE / GPO_DEA_VALIDATE / GPO_HRSA_VALIDATE / GPO_USPS_VALIDATE use
+        ORIGINAL_* and UPDATED_*; GPO_COT_VALIDATE uses ORIGINAL_COT and CORRECTED_COT;
+        GPO_CUST_STG_OUTPUT uses SOURCE_* and CORRECTED_*. When the user asks 'what changed',
+        return both sides. A record was corrected when the two differ.
+    - category: "Class of Trade is derived"
+      rule: >
+        COT is NOT a master lookup. GPO_COT_VALIDATE reconciles ORIGINAL_COT against HIBCC_COT
+        (from the HIN match), DEA_COT (from the DEA match) and RODB_COT to produce CORRECTED_COT,
+        keyed by BATCH_NUM + CUSTOMER_NAME. There is no GPO_COT master table — do not invent one.
+    - category: "Program-specific pipelines - ASK, DO NOT ASSUME"
+      rule: >
+        Four parallel pipelines exist in this database with near-identical table shapes:
+        GPO_* (the base/default program), REG_*, ABBOTT_* and EISAI_*.
+        Use GPO_* tables unless the user explicitly names REG, Abbott or Eisai.
+        If a question about batches, validation or output could apply to more than one program and
+        the user has not said which, ASK which program they mean rather than guessing — the numbers
+        differ completely between them.
+        Note ABBOTT_* has no HIN/DEA/USPS validators (it uses ABBOTT_CYCLIC_VALIDATE and
+        ABBOTT_PARENT_VALIDATE), and EISAI_* is change-tracking (additions/removals/changes),
+        not validation.
+    - category: "Membership vs member validation"
+      rule: >
+        These are unrelated despite similar names.
+        - MN_MEMBER / MN_ORGANIZATION_ID / MN_CF_ELIGIBLE_CUSTOMER = reference membership master
+        data, keyed by MEMBER_ID, NOT batch-scoped.
+        - GPO_MEMBER_VALIDATE = per-batch membership MATCHING results, keyed by BATCH_NUM + NAME.
+        - GPO_MEMBERSHIP_HEIRARCHY = GPO parent/child org hierarchy.
+        Pick by whether the question is about reference data or about a batch run.
+    - category: "Audit trail"
+      rule: >
+        GPO_LOGS is the only audit table for the GPO program (REG_LOGS and ABBOTT_LOGS for those
+        programs). Query it by BATCH_NUM and USER_ACTION. Real USER_ACTION values include
+        'HIN Validation', 'HIN Verification', 'HIN Selection', 'USPS Validation', 'DEA Validation',
+        'COT Validation', 'Output File', 'STAGE_OUPTUT' (note the typo in the data) and
+        'Upload Member File'.
+    - category: "Column naming and safety"
+      rule: >
+        Business columns in this database are UPPER_CASE (BATCH_NUM, ORIGINAL_HIN, CURRENT_ACTION),
+        with a few exceptions: GPO_CUST_HDR.isOutputGenerated, GPO_LOGS.action_desc and
+        GPO_COT_VALIDATE.Modified. Table name spellings to respect exactly:
+        GPO_MEMBERSHIP_HEIRARCHY and EISAI_MEMBERSHIP_HEIRARCHY_CHANGES ('HEIRARCHY'),
+        GPO_ADMIN_VALIDATION_CONFIG.SIMILIARITY_TYPE ('SIMILIARITY').
+        Output tables use KEYNUM while GPO_CUST_INPUT/GPO_HIN/GPO_DEA use KEY_NUM.
+        NEVER invent a table or column name — call describe_table('<name>') when unsure.
+    - category: "Read-only and result size"
+      rule: >
+        This source is strictly read-only: SELECT / SHOW / DESCRIBE / EXPLAIN only.
+        Cross-table search is DISABLED here because of table sizes — use targeted SELECTs with a
+        WHERE clause. Prefer aggregates (COUNT/GROUP BY) over returning raw rows from the large
+        tables.
+
+  # ============================================================
+  # PRE-DEFINED SQL MEASURES
+  # Templates using verified column names. Replace <batch_num>
+  # with the batch the user asked about.
+  # ============================================================
+  measures:
+    - name: batch_pipeline_status
+      description: "Per-stage status for a batch, joined to its header"
+      sql: "SELECT h.BATCH_NUM, h.FILE_NAME, h.CURRENT_ACTION, h.TOTAL_RECORDS, h.VALID_RECORDS, h.ERROR_RECORDS, j.STATUS, j.HIN_STATUS, j.DEA_STATUS, j.HRSA_STATUS, j.USPS_STATUS, j.COT_STATUS, j.MEMBER_STATUS, j.STG_STATUS, j.OUTPUT_STATUS, j.PROCESSING_TIME FROM GPO_CUST_HDR h JOIN GPO_VALIDATION_JOBS j ON h.BATCH_NUM = j.BATCH_NUM WHERE h.BATCH_NUM = <batch_num>"
+    - name: recent_batches
+      description: "Most recently created batches with their validation completion flags"
+      sql: "SELECT BATCH_NUM, FILE_NAME, CREATED_DATE, CREATED_BY, CURRENT_ACTION, VALIDATION_TYPE, TOTAL_RECORDS, VALID_RECORDS, ERROR_RECORDS, HIN_VALIDATED, DEA_VALIDATED, HRSA_VALIDATED, USPS_VALIDATED, COT_VALIDATED, MEMBER_VALIDATED, isOutputGenerated FROM GPO_CUST_HDR ORDER BY CREATED_DATE DESC LIMIT 20"
+    - name: failed_stages_by_batch
+      description: "Batches with any stage in a failed state (case-insensitive)"
+      sql: "SELECT BATCH_NUM, STATUS, HIN_STATUS, DEA_STATUS, HRSA_STATUS, USPS_STATUS, COT_STATUS, MEMBER_STATUS, STG_STATUS, OUTPUT_STATUS FROM GPO_VALIDATION_JOBS WHERE LOWER(STATUS) = 'failed' OR LOWER(HIN_STATUS) = 'failed' OR LOWER(DEA_STATUS) = 'failed' OR LOWER(HRSA_STATUS) = 'failed' OR LOWER(USPS_STATUS) = 'failed' OR LOWER(COT_STATUS) = 'failed' OR LOWER(MEMBER_STATUS) = 'failed' OR LOWER(OUTPUT_STATUS) = 'failed' ORDER BY BATCH_NUM DESC"
+    - name: job_status_summary
+      description: "Count of batches by overall job status"
+      sql: "SELECT STATUS, COUNT(*) AS batch_count FROM GPO_VALIDATION_JOBS GROUP BY STATUS ORDER BY batch_count DESC"
+    - name: hin_match_outcome_summary
+      description: "HIN match outcomes for a batch, by match type"
+      sql: "SELECT STATUS, MATCH_TYPE, COUNT(*) AS record_count FROM GPO_HIN_VALIDATE WHERE BATCH_NUM = <batch_num> GROUP BY STATUS, MATCH_TYPE ORDER BY record_count DESC"
+    - name: hin_corrections_for_batch
+      description: "HIN records whose value or name was changed by validation"
+      sql: "SELECT BATCH_NUM, ORIGINAL_NAME, ORIGINAL_HIN, UPDATED_NAME, UPDATED_HIN, STATUS, MATCH_TYPE, SIMILARITY_SCORE FROM GPO_HIN_VALIDATE WHERE BATCH_NUM = <batch_num> AND (ORIGINAL_HIN <> UPDATED_HIN OR ORIGINAL_NAME <> UPDATED_NAME) LIMIT 200"
+    - name: unmatched_hin_records
+      description: "Input records that found no HIN match in a batch"
+      sql: "SELECT BATCH_NUM, ORIGINAL_NAME, ORIGINAL_HIN, ORIGINAL_CITY, ORIGINAL_STATE, STATUS, MATCH_TYPE FROM GPO_HIN_VALIDATE WHERE BATCH_NUM = <batch_num> AND (STATUS = 'NO' OR MATCH_TYPE = 'no_match') LIMIT 200"
+    - name: address_corrections_for_batch
+      description: "USPS address corrections applied in a batch"
+      sql: "SELECT BATCH_NUM, ORIGINAL_NAME, ORIGINAL_STREET, ORIGINAL_CITY, ORIGINAL_STATE, ORIGINAL_POSTAL_CODE, UPDATED_STREET, UPDATED_CITY, UPDATED_STATE, UPDATED_POSTAL_CODE, PLUS_4_CODE, ACTION FROM GPO_USPS_VALIDATE WHERE BATCH_NUM = <batch_num> AND (ORIGINAL_STREET <> UPDATED_STREET OR ORIGINAL_POSTAL_CODE <> UPDATED_POSTAL_CODE) LIMIT 200"
+    - name: cot_discrepancies_for_batch
+      description: "Records where the corrected Class of Trade differs from the submitted one"
+      sql: "SELECT BATCH_NUM, CUSTOMER_NAME, ORIGINAL_COT, HIBCC_COT, DEA_COT, RODB_COT, CORRECTED_COT FROM GPO_COT_VALIDATE WHERE BATCH_NUM = <batch_num> AND CORRECTED_COT <> ORIGINAL_COT LIMIT 200"
+    - name: member_match_summary
+      description: "Membership match outcomes for a batch, by criteria"
+      sql: "SELECT STATUS, MATCHING_CRITERIA, COUNT(*) AS record_count FROM GPO_MEMBER_VALIDATE WHERE BATCH_NUM = <batch_num> GROUP BY STATUS, MATCHING_CRITERIA ORDER BY record_count DESC"
+    - name: final_output_for_batch
+      description: "Final formatted output rows for a batch"
+      sql: "SELECT KEYNUM, BATCH_NUM, NAME, CORRECTED_HIN, CORRECTED_DEA, CORRECTED_HRSA, STATUS, HIBCC_COT, DEA_COT, RODB_COT, MN_COT, CORRECTED_STREET, CORRECTED_CITY, CORRECTED_STATE, CORRECTED_POSTAL_CODE, MEMBER_MATCHING_CRITERIA FROM GPO_CUST_OUTPUT WHERE BATCH_NUM = <batch_num> LIMIT 200"
+    - name: batches_awaiting_output
+      description: "Batches fully validated but with no output generated yet"
+      sql: "SELECT BATCH_NUM, FILE_NAME, CREATED_DATE, CURRENT_ACTION FROM GPO_CUST_HDR WHERE isOutputGenerated = 0 AND HIN_VALIDATED = 1 AND DEA_VALIDATED = 1 AND USPS_VALIDATED = 1 AND COT_VALIDATED = 1 ORDER BY CREATED_DATE DESC"
+    - name: batch_audit_trail
+      description: "Audit trail for a batch, newest first"
+      sql: "SELECT BATCH_NUM, USER_ACTION, action_desc, CREATED_DATE, CREATED_BY FROM GPO_LOGS WHERE BATCH_NUM = <batch_num> ORDER BY CREATED_DATE DESC LIMIT 200"
+    - name: action_volume_summary
+      description: "Most frequent audit actions across all batches"
+      sql: "SELECT USER_ACTION, COUNT(*) AS action_count FROM GPO_LOGS GROUP BY USER_ACTION ORDER BY action_count DESC"
+    - name: role_permission_matrix
+      description: "Roles with their CRUD permissions"
+      sql: "SELECT r.ROLE_ID, r.ROLE, r.DESCRIPTION, p.CAN_VIEW, p.CAN_ADD, p.CAN_EDIT, p.CAN_DELETE FROM GPO_ROLE_MASTER r LEFT JOIN GPO_ROLE_PERMISSION p ON r.ROLE_ID = p.ROLE_ID ORDER BY r.ROLE_ID"
+    - name: users_by_role
+      description: "Users assigned to each role"
+      sql: "SELECT r.ROLE, m.USER_ID, m.USERNAME, m.EMAIL, m.STATUS, m.ASSIGNED_DATE FROM GPO_ROLE_MAPPING m JOIN GPO_ROLE_MASTER r ON m.ROLE_ID = r.ROLE_ID ORDER BY r.ROLE, m.USERNAME"
+    - name: recent_logins
+      description: "Most recent login sessions with the user's role"
+      sql: "SELECT l.USER_ID, m.USERNAME, r.ROLE, l.LOGIN_TIME, l.EXPIRY_TIME, l.STATUS FROM GPO_USER_LOGIN l LEFT JOIN GPO_ROLE_MAPPING m ON l.USER_ID = m.USER_ID LEFT JOIN GPO_ROLE_MASTER r ON m.ROLE_ID = r.ROLE_ID ORDER BY l.LOGIN_TIME DESC LIMIT 50"
+    - name: members_with_organization_ids
+      description: "Members with their organization identifiers"
+      sql: "SELECT m.MEMBER_ID, m.MEMBER_NAME, m.MEMBER_GRP_NAME, o.TYPE, o.IDENTIFIER, o.PRIMARY_FLAG, o.START_DATE, o.END_DATE FROM MN_MEMBER m LEFT JOIN MN_ORGANIZATION_ID o ON m.MEMBER_ID = o.MEMBER_ID ORDER BY m.MEMBER_NAME"
+    - name: eligible_customers_latest
+      description: "Current eligible-customer records per member"
+      sql: "SELECT m.MEMBER_ID, m.MEMBER_NAME, c.ELIGIBLE_CUSTOMER_ID, c.START_DATE, c.END_DATE, c.INC_FLAG FROM MN_CF_ELIGIBLE_CUSTOMER c JOIN MN_MEMBER m ON c.MEMBER_ID = m.MEMBER_ID WHERE c.IS_LATEST_ELIGIBILITY = 1 ORDER BY m.MEMBER_NAME"
+    - name: contracts_by_document
+      description: "Structured contracts with their parent document"
+      sql: "SELECT d.STRUCT_DOC_ID, d.STRUCT_DOC_NAME, c.STRUCT_CTRT_ID, c.CTRT_DOC_STATUS, c.STRUCT_DOC_TYPE, c.CTRT_SUB_TYPE, c.CONTRACT_TERM, c.DATE_APPROVED, c.DATE_IMPLEMENTED FROM MN_STRUCTURED_CONTRACT c JOIN MN_STRUCTURED_DOC d ON c.STRUCT_DOC_ID = d.STRUCT_DOC_ID ORDER BY d.STRUCT_DOC_NAME"
+    - name: membership_hierarchy
+      description: "GPO membership parent/child hierarchy"
+      sql: "SELECT GPO_ID, GPO_NAME, GRAND_PARENT_ID, GRAND_PARENT_NAME, PARENT_ID, PARENT_NAME, CHILD_ID, CHILD_NAME FROM GPO_MEMBERSHIP_HEIRARCHY ORDER BY GPO_NAME LIMIT 200"

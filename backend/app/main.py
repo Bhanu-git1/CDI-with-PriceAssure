@@ -8,56 +8,49 @@ from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.llm_service import llm_service, db_service, sf_service
+from app.datasources import registry
+from app.llm_service import llm_service, db_service
 from app.services.history_service import HistoryService
 
 # Configure standard console logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dce-fastapi-app")
 
+# Chat transcripts always live in DB 1, independent of which source a question
+# was answered from.
 history_service = HistoryService(db_service)
 
 
-def _check_mysql() -> dict:
+def _check_connections() -> list:
     """
-    Live MySQL connectivity check. Never raises — a failed/unreachable
-    connection is reported as "offline", not "error"; "error" is reserved
-    for genuine application bugs, not a disconnected service.
+    Live reachability of every registered data source, in the shape the UI's
+    "Connected System Status" panel renders.
+
+    Never raises — an unreachable source is reported as "offline", not
+    "error"; "error" is reserved for genuine application bugs.
     """
-    try:
-        conn = db_service.get_connection()
-        conn.close()
-        return {"name": "MySQL Database", "status": "connected", "detail": None}
-    except Exception as e:
-        return {"name": "MySQL Database", "status": "offline", "detail": str(e)}
-
-
-def _check_salesforce() -> dict:
-    """Live Salesforce connectivity check — see _check_mysql for status semantics."""
-    try:
-        sf_service.get_connection()
-        return {"name": "Salesforce CRM", "status": "connected", "detail": None}
-    except Exception as e:
-        return {"name": "Salesforce CRM", "status": "offline", "detail": str(e)}
+    return registry.health()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: log initial reachability and initialize history tables
-    logger.info("Initializing MySQL DCE workspace...")
-    logger.info(f"MySQL connection check: {_check_mysql()['status']}")
+    logger.info(
+        f"Initializing DCE workspace with {len(registry.ids())} data source(s): "
+        f"{', '.join(registry.ids())}"
+    )
+
+    for row in await run_in_threadpool(_check_connections):
+        logger.info(f"  {row['name']}: {row['status']}" + (f" ({row['detail']})" if row["detail"] else ""))
 
     try:
         await run_in_threadpool(history_service.init_db)
     except Exception as e:
         logger.warning(f"History service db init deferred or failed: {e}")
 
-    logger.info("Initializing Salesforce DCE workspace (UC3)...")
-    logger.info(f"Salesforce connection check: {_check_salesforce()['status']}")
-
     yield
 
-    logger.info("Shutting down MySQL DCE workspace...")
+    logger.info("Shutting down DCE workspace...")
 
 
 # Create FastAPI instance with Lifespan lifecycle hooks
@@ -84,11 +77,18 @@ class ChatMessage(BaseModel):
     sender: str
     text: str
     sql: Optional[str] = None
+    # Carried back by the frontend so the router can keep short follow-up
+    # turns on the source that answered the previous one.
+    source: Optional[str] = None
+    source_id: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
     message: str
     history: Optional[List[ChatMessage]] = []
+    # Explicit data source selection from the UI. "auto" (or omitted) lets the
+    # router decide; a concrete source id overrides routing entirely.
+    source: Optional[str] = None
 
 
 class ChatMessageItem(BaseModel):
@@ -126,30 +126,55 @@ class SyncLocalPayload(BaseModel):
 @app.get("/api")
 @app.get("/")
 async def read_root():
+    # Two forms: `provider_short` is what the sidebar shows, `provider` carries
+    # the full model id for the tooltip and for logs. The UI needs a name it can
+    # render in a narrow column, not a fully-qualified model identifier.
     if llm_service.provider == "groq":
+        provider_short = "Groq"
         provider = f"Groq ({settings.GROQ_MODEL})"
     elif llm_service.provider == "claude":
-        backend_label = "Bedrock" if llm_service.is_bedrock else "Anthropic"
-        provider = f"Claude via {backend_label} ({llm_service.claude_model})"
+        provider_short = "Bedrock" if llm_service.is_bedrock else "Anthropic"
+        provider = f"Claude via {provider_short} ({llm_service.claude_model})"
     else:
+        provider_short = "Not configured"
         provider = "Not configured"
 
-    # Run all three health checks concurrently. MySQL/Salesforce use blocking
-    # client libraries, so they're offloaded to a thread pool; the LLM check
-    # is native async.
-    mysql_health, sf_health, llm_health = await asyncio.gather(
-        run_in_threadpool(_check_mysql),
-        run_in_threadpool(_check_salesforce),
+    # Data source probes use blocking client libraries, so they're offloaded to
+    # a thread pool; the LLM check is native async.
+    connections, llm_health = await asyncio.gather(
+        run_in_threadpool(_check_connections),
         llm_service.check_llm_health(),
     )
 
     return {
         "status": "online",
         "provider": provider,
-        "connections": [mysql_health, sf_health],
-        "llm": {"name": provider, "status": llm_health["status"], "detail": llm_health["detail"]},
-        "dce_service": "mysql-service + salesforce-service (active)",
-        "platform": "MySQL Database (UC1/UC2) + Salesforce CRM (UC3)"
+        "connections": connections,
+        "sources": registry.public_catalogue(),
+        "provider_short": provider_short,
+        "llm": {
+            "name": provider_short,
+            "full_name": provider,
+            "status": llm_health["status"],
+            "detail": llm_health["detail"],
+        },
+        "dce_service": " + ".join(f"{c.id}({c.kind})" for c in registry.all()),
+        "platform": " + ".join(c.label for c in registry.all()),
+    }
+
+
+@app.get("/api/sources")
+async def list_sources():
+    """
+    Data source catalogue for the UI source selector.
+
+    `auto` is offered alongside the real sources: it lets the user defer to the
+    router, which is the default.
+    """
+    return {
+        "default": registry.default_source_id,
+        "auto_supported": True,
+        "sources": registry.public_catalogue(),
     }
 
 
@@ -161,22 +186,50 @@ async def chat_endpoint(request: ChatRequest):
     """
     if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
-        
-    logger.info(f"Received chat request (DCE): {request.message}")
-    
-    # Run the prompt-execution loop
-    response_data = await llm_service.process_chat(request.message, request.history)
+
+    if request.source and request.source not in ("auto",) and registry.get(request.source) is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown data source '{request.source}'. Known: "
+                   f"{', '.join(['auto'] + registry.ids())}",
+        )
+
+    logger.info(
+        f"Received chat request (DCE): {request.message} "
+        f"[source={request.source or 'auto'}]"
+    )
+
+    # Route to a data source, then run that source's prompt-execution loop
+    response_data = await llm_service.process_chat(
+        request.message, request.history, requested_source=request.source
+    )
     return response_data
 
 
 @app.get("/api/schema")
-async def schema_endpoint():
+async def schema_endpoint(source: Optional[str] = Query(None)):
     """
-    Exposes MySQL table schema context to the frontend.
+    Exposes a data source's schema to the frontend explorer.
+
+    Defaults to the primary source when `source` is omitted, so existing
+    callers keep the response they had before multi-source support.
     """
-    logger.info("Fetching MySQL schema info for explorer...")
-    schema_overview = await llm_service.get_schema_context()
-    return {"schema": schema_overview}
+    source_id = source or registry.default_source_id
+    ctx = registry.get(source_id)
+    if ctx is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown data source '{source_id}'. Known: {', '.join(registry.ids())}",
+        )
+
+    logger.info(f"Fetching schema info for source '{source_id}'...")
+    try:
+        schema_overview = await run_in_threadpool(ctx.adapter.get_schema_overview)
+    except Exception as e:
+        logger.error(f"Failed to read schema for '{source_id}': {e}")
+        schema_overview = f"Could not read schema for {ctx.label}. Error: {e}"
+
+    return {"source": source_id, "label": ctx.label, "schema": schema_overview}
 
 
 # -------------------------------------------------------------

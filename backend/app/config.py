@@ -8,12 +8,19 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 env_file_path = os.path.abspath(os.path.join(current_dir, "..", ".env"))
 
 class Settings(BaseSettings):
-    # MySQL Connection Settings
+    # MySQL Connection Settings — DB 1 (Commercial / Pharma Command Centre)
     MYSQL_HOST: str = "localhost"
     MYSQL_PORT: int = 3306
     MYSQL_USER: str = ""
     MYSQL_PASSWORD: str = ""
     MYSQL_DATABASE: str = ""
+
+    # MySQL Connection Settings — DB 2 (GPO Customer Roster Validation)
+    GPO_MYSQL_HOST: str = ""
+    GPO_MYSQL_PORT: int = 3306
+    GPO_MYSQL_USER: str = ""
+    GPO_MYSQL_PASSWORD: str = ""
+    GPO_MYSQL_DATABASE: str = ""
 
     # LLM Settings
     GROQ_API_KEY: Optional[str] = None
@@ -41,6 +48,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE",
+        "GPO_MYSQL_HOST", "GPO_MYSQL_USER", "GPO_MYSQL_PASSWORD", "GPO_MYSQL_DATABASE",
         "GROQ_API_KEY", "GROQ_MODEL", "CLAUDE_API_KEY", "CLAUDE_MODEL", "HOST",
         "SF_USERNAME", "SF_PASSWORD", "SF_SECURITY_TOKEN", "SF_DOMAIN", "SF_SESSION_ID", "SF_INSTANCE_URL",
         "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "BEDROCK_CLAUDE_MODEL",

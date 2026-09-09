@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MessageBubble from './components/MessageBubble';
+import SourceSelector from './components/SourceSelector';
 import LoginPage from './components/LoginPage';
 import logoMain from './assets/SRM_logo.png';
 import logoSmall from './assets/SRM_logo_small.png';
@@ -35,8 +36,14 @@ export default function App() {
   const [inputValue, setInputValue] = useState('');
   const [queryLoading, setQueryLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState('connecting'); // online | offline | connecting
+  // Short name for display; the fully-qualified model id stays on hover.
   const [activeModel, setActiveModel] = useState('');
+  const [activeModelFull, setActiveModelFull] = useState('');
   const [connections, setConnections] = useState([]);
+  // Data source catalogue from the backend, and the user's selection.
+  // 'auto' defers to the backend router, which is the default.
+  const [sources, setSources] = useState([]);
+  const [selectedSource, setSelectedSource] = useState('auto');
   const [llmStatus, setLlmStatus] = useState('connecting'); // connected | offline | connecting
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [systemStatusOpen, setSystemStatusOpen] = useState(true);
@@ -388,8 +395,10 @@ export default function App() {
       if (statusRes.ok) {
         const statusData = await statusRes.json();
         setServerStatus('online');
-        setActiveModel(statusData.provider || 'AI Model');
+        setActiveModel(statusData.provider_short || statusData.provider || 'AI Model');
+        setActiveModelFull(statusData.llm?.full_name || statusData.provider || '');
         setConnections(statusData.connections || []);
+        setSources(statusData.sources || []);
         setLlmStatus(statusData.llm?.status || 'offline');
       } else {
         setServerStatus('offline');
@@ -412,9 +421,12 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  const handleSendMessage = async (textToSend) => {
+  // `sourceOverride` lets a clarification chip re-send the same question pinned
+  // to one data source, without changing the user's standing selection.
+  const handleSendMessage = async (textToSend, sourceOverride) => {
     const queryText = textToSend || inputValue;
     if (!queryText.trim()) return;
+    const sourceForRequest = sourceOverride || selectedSource || 'auto';
 
     let chatId = currentChatId;
     const isNewChat = !chatId;
@@ -471,7 +483,8 @@ export default function App() {
     try {
       const requestBody = {
         message: queryText,
-        history: messages
+        history: messages,
+        source: sourceForRequest
       };
 
       const response = await fetch(`${apiEndpoint}/api/chat`, {
@@ -497,6 +510,14 @@ export default function App() {
         data: result.data,
         error: result.error,
         source: result.source,
+        // Machine-readable source id and badge: the id lets the backend keep
+        // short follow-up turns on the same source, the badge drives styling.
+        source_id: result.source_id,
+        source_badge: result.source_badge,
+        routing: result.routing,
+        // Set when the router declined to guess between data sources.
+        needs_clarification: result.needs_clarification,
+        candidates: result.candidates,
         timestamp: new Date().toISOString()
       };
 
@@ -647,8 +668,11 @@ export default function App() {
 
                     {connections.map((conn) => {
                       const dotColor = statusToColor(conn.status);
+                      // Row shows the short name; the full descriptive name and
+                      // any connection error go on hover.
+                      const tip = [conn.label, conn.detail].filter(Boolean).join(' — ');
                       return (
-                        <div className="connection-row" key={conn.name} title={conn.detail || ''}>
+                        <div className="connection-row" key={conn.id || conn.name} title={tip}>
                           <span className="connection-dot" style={{ backgroundColor: dotColor, boxShadow: `0 0 6px ${dotColor}` }} />
                           <span className="connection-name">{conn.name}</span>
                           <span className="connection-state" style={{ color: dotColor }}>{conn.status === 'connected' ? 'online' : conn.status}</span>
@@ -686,7 +710,7 @@ export default function App() {
 
                 {modelStatusOpen && (
                   <div className="sidebar-section-content">
-                    <div className="connection-row" title={activeModel || ''}>
+                    <div className="connection-row" title={activeModelFull || activeModel || ''}>
                       <span className="connection-dot" style={{ backgroundColor: llmColor, boxShadow: `0 0 6px ${llmColor}` }} />
                       <span className="connection-name">{activeModel || 'Detecting...'}</span>
                       <span className="connection-state" style={{ color: llmColor }}>{llmStatus === 'connected' ? 'online' : llmStatus}</span>
@@ -916,7 +940,7 @@ export default function App() {
                   setSidebarOpen(true);
                   setModelStatusOpen(true);
                 }}
-                title={`AI Model: ${activeModel || 'Connected'} (${llmStatus})`}
+                title={`AI Model: ${activeModelFull || activeModel || 'Connected'} (${llmStatus})`}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="12" y1="17" x2="12" y2="22" />
@@ -987,6 +1011,12 @@ export default function App() {
                 />
 
                 <div className="input-right-actions">
+                  <SourceSelector
+                    sources={sources}
+                    value={selectedSource}
+                    onChange={setSelectedSource}
+                    disabled={queryLoading}
+                  />
                   <button
                     type="button"
                     className={`input-wave-btn ${inputValue.trim() ? 'has-text' : ''}`}
@@ -1028,6 +1058,10 @@ export default function App() {
                   message={msg}
                   previousUserPrompt={prevUserPrompt}
                   onSelectSuggestion={(query) => handleSendMessage(query)}
+                  // Re-ask the same question, pinned to the source the user picked.
+                  onPickSource={(sourceId) =>
+                    prevUserPrompt && handleSendMessage(prevUserPrompt, sourceId)
+                  }
                 />
               );
             })
@@ -1067,6 +1101,12 @@ export default function App() {
               />
 
               <div className="input-right-actions">
+                <SourceSelector
+                  sources={sources}
+                  value={selectedSource}
+                  onChange={setSelectedSource}
+                  disabled={queryLoading}
+                />
                 <button
                   type="button"
                   className={`input-wave-btn ${inputValue.trim() ? 'has-text' : ''}`}
