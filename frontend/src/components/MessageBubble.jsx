@@ -40,7 +40,7 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
   // conversation to a different database without the user asking.
   const followUpSuggestions =
     sender === 'assistant' && !needsClarification
-      ? getFollowUpSuggestions(previousUserPrompt, message.source_id)
+      ? getFollowUpSuggestions(previousUserPrompt, message.source_id || message.source_badge || message.source)
       : [];
 
   // Badge class comes from the backend-declared badge, falling back to the
