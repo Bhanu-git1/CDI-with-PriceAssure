@@ -40,7 +40,6 @@ router:
   decision_cache_size: 256
 
 sources:
-
   # ===================================================================
   # DB 1 — Commercial / Pharma Command Centre (UC1, UC2, UC4, UC5)
   # ===================================================================
@@ -49,7 +48,7 @@ sources:
     # short_label is what the UI shows — sidebar, source selector, answer badge.
     # Kept free of the engine name ("MySQL"): which engine backs a source is an
     # implementation detail, not something a user picks between.
-    short_label: "Commercial"
+    short_label: "Commercial - mySQL"
     kind: mysql
     enabled: true
     # Higher priority wins a dead-even tie. Preserves the pre-existing
@@ -172,17 +171,16 @@ sources:
       exclude_keywords: []
 
   # ===================================================================
-  # DB 2 — Memcot Customer Roster Validation
+  # DB 2 — memCOT - mySQL Customer Roster Validation
   #
-  # Displayed as "Memcot", the business name for this program (it is the
-  # dominant value in GPO_CUST_HDR.GPO). The source id, the `gpo` schema, the
-  # GPO_* table prefix and the GPO_MYSQL_* env vars are deliberately unchanged:
-  # they are internal, and renaming them would invalidate saved transcripts and
-  # desync the generated semantic layer from the real table names.
+  # Displayed as "memCOT - mySQL", the business name for this program. The source
+  # id (mysql_gpo), the `gpo` schema, the GPO_* table prefix and the GPO_MYSQL_*
+  # env vars are deliberately unchanged: they are internal, and renaming them
+  # would invalidate saved transcripts and desync the generated semantic layer.
   # ===================================================================
   - id: mysql_gpo
-    label: "Memcot Customer Roster Validation"
-    short_label: "Memcot"
+    label: "memCOT - mySQL Customer Roster Validation"
+    short_label: "memCOT - mySQL"
     kind: mysql
     enabled: true
     priority: 10
@@ -191,6 +189,8 @@ sources:
     badge: "gpo"
     aliases:
       - "memcot"
+      - "memcot - mysql"
+      - "memcot mysql"
       - "memcot db"
       - "memcot database"
       - "gpo"
