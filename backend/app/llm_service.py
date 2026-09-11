@@ -55,6 +55,7 @@ RULES:
 - Use standard MySQL SQL syntax.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
+- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, data structure, flowchart, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of table relationships and join keys. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
 """
 
 # UC3 (Salesforce) system prompt — reused verbatim from the standalone DCE Salesforce project.
@@ -90,6 +91,7 @@ RULES:
 - Use standard MySQL SQL syntax.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
+- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, data structure, flowchart, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of custom objects (Doctor__c, Rep_Details__c) and relationship fields. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
 """
 
 
@@ -138,6 +140,7 @@ RULES:
 - Prefer aggregates (COUNT, GROUP BY) over returning raw rows from the large tables.
 - Use standard MySQL SQL syntax.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
+- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, pipeline flow, data structure, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of pipeline stages, lookup tables, and join keys. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
 """
 
 
@@ -339,7 +342,9 @@ class LLMService:
             "      - For Practice_State__c & State_License__c: Support full state names and postal codes (e.g. State_License__c LIKE '%California%' OR State_License__c LIKE '%CA%' OR Practice_State__c LIKE '%CA%').\n"
             "  12. GREETINGS & SCHEMA QUESTIONS:\n"
             "      - If the user prompt is a greeting (e.g. 'hello', 'hi', 'hey', 'help'), set code = null and provide a helpful, welcoming natural language answer in the 'answer' field explaining available data (Doctors, Sales Reps) with example prompts.\n"
-            "      - If the user asks about available tables or schema ('what objects are in Salesforce?', 'describe Doctor__c object'), provide the schema info in 'answer' or run sf.describe_object('Doctor__c') / sf.list_objects().\n\n"
+            "      - If the user asks about available tables or schema ('what objects are in Salesforce?', 'describe Doctor__c object'), provide the schema info in 'answer' or run sf.describe_object('Doctor__c') / sf.list_objects().\n"
+            "  13. DIAGRAM & ER MODEL REQUESTS:\n"
+            "      - When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'architecture diagram', 'flowchart'), generate a valid Mermaid diagram block (```mermaid\nerDiagram\n...\n``` or ```mermaid\nflowchart TD\n...\n```) in the 'answer' field explaining Doctor__c and Rep_Details__c relationships. Set code = null unless live data is requested. DO NOT return dummy records in a table.\n\n"
             "Example of querying Doctors with Rep Email & Contact Info:\n"
             "data = json.loads(sf.execute_soql(\"SELECT HCP_First_Name__c, HCP_Last_Name__c, Phone__c, State_License__c, Speciality__c, Practice_State__c, Status__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c WHERE Status__c = 'In-Progress'\"))\n"
             "result = {\"soql\": \"SELECT HCP_First_Name__c, HCP_Last_Name__c, Phone__c, State_License__c, Speciality__c, Practice_State__c, Status__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c WHERE Status__c = 'In-Progress'\", \"records\": data.get(\"records\", [])}\n\n"
@@ -383,7 +388,12 @@ class LLMService:
             "program and the user did not say which, set code = null and ask which program they mean "
             "in the 'answer' field.\n"
             "  9. GREETINGS & SCHEMA QUESTIONS: if the prompt is a greeting or asks what data is "
-            "available, set code = null and describe the pipeline domains in 'answer' with example prompts.\n\n"
+            "available, set code = null and describe the pipeline domains in 'answer' with example prompts.\n"
+            "  10. DIAGRAM & ER MODEL REQUESTS: When the user asks for a diagram (e.g. 'relationship diagram', "
+            "'ER diagram', 'pipeline flow', 'architecture diagram'), generate a valid Mermaid diagram block "
+            "(```mermaid\\nerDiagram\\n...\\n``` or ```mermaid\\nflowchart TD\\n...\\n```) in the 'answer' field "
+            "illustrating the validation pipeline stages, lookup tables, and join keys. Set code = null unless live "
+            "data is requested. DO NOT return dummy SQL records in a table.\n\n"
             "Example 1 - per-stage status for a batch:\n"
             "sql = \"SELECT h.BATCH_NUM, h.FILE_NAME, h.CURRENT_ACTION, j.STATUS, j.HIN_STATUS, j.DEA_STATUS, "
             "j.USPS_STATUS, j.COT_STATUS, j.HRSA_STATUS, j.OUTPUT_STATUS FROM GPO_CUST_HDR h "
@@ -582,8 +592,14 @@ class LLMService:
             # The adapter's row cap, so the summary can distinguish "this is the
             # whole answer" from "this is the first page of a larger set".
             row_cap = getattr(getattr(ctx.adapter, "raw_service", None), "row_limit", None)
+
+            if answer and ("```mermaid" in answer or "erDiagram" in answer or "flowchart" in answer or "graph " in answer):
+                final_answer = answer
+            else:
+                final_answer = self._generate_data_summary(user_message, result_data, row_cap=row_cap)
+
             return {
-                "answer": self._generate_data_summary(user_message, result_data, row_cap=row_cap),
+                "answer": final_answer,
                 "sql": sql_to_return,
                 "data": data_to_return,
                 "error": None,
@@ -807,7 +823,8 @@ class LLMService:
             "  3. Store final output in variable 'result' = {'sql': '<query_string>', 'records': <records_list>}.\n"
             "  4. Global scope has 'db', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
             "  5. Write valid multi-line Python code with proper line breaks.\n"
-            "  6. When a PRE-DEFINED SQL MEASURE matches the user's question, adapt it as your template.\n\n"
+            "  6. When a PRE-DEFINED SQL MEASURE matches the user's question, adapt it as your template.\n"
+            "  7. DIAGRAM & ER MODEL REQUESTS: When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'architecture diagram', 'flowchart', 'process flow'), generate a valid Mermaid diagram block (```mermaid\\nerDiagram\\n...\\n``` or ```mermaid\\nflowchart TD\\n...\\n```) in your 'answer' field with clear entity and join relationships. Set code = null unless live database queries are specifically needed. DO NOT return dummy SQL records in a table.\n\n"
             "Example 1 - UC3 Work details (uses hcp_master_details):\n"
             "sql = \"SELECT hcp_firstName, hcp_lastName, Prescriber_NPI, rep_id, status, work_detail, updated_at FROM hcp_master_details ORDER BY updated_at DESC\"\n"
             "data = json.loads(db.execute_sql(sql))\n"
@@ -822,7 +839,7 @@ class LLMService:
             "Format your output ONLY as a JSON object with these keys:\n"
             "{\n"
             "  \"reasoning\": \"your reasoning/steps\",\n"
-            "  \"code\": \"python code string to run\",\n"
+            "  \"code\": \"python code string to run or null\",\n"
             "  \"answer\": \"natural language answer if no database query is required\"\n"
             "}\n"
             "Output ONLY the JSON object. Do not wrap in markdown tags like ```json."
@@ -891,32 +908,69 @@ class LLMService:
         return ""
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
-        """Robust JSON payload extractor that handles markdown code blocks and multiline strings."""
+        """Robust JSON payload extractor that handles markdown code blocks, multiline strings, and unescaped diagrams."""
         if not text:
             return {}
         raw = text.strip()
         if "```json" in raw:
             raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
-        elif "```" in raw:
+        elif "```" in raw and raw.startswith("```"):
             raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
             
         start = raw.find("{")
         end = raw.rfind("}")
         if start != -1 and end != -1 and end > start:
             raw = raw[start:end+1]
-            
+
+        # Strategy 1: Direct JSON load
         try:
             return json.loads(raw, strict=False)
         except Exception:
-            import re
+            pass
+
+        # Strategy 2: Fix unescaped control chars / newlines inside string literals
+        try:
             def fix_newlines(match):
-                return match.group(0).replace("\n", "\\n").replace("\r", "")
-            cleaned = re.sub(r'"([^"\\]*(\\.[^"\\]*)*)"', fix_newlines, raw, flags=re.DOTALL)
-            try:
-                return json.loads(cleaned, strict=False)
-            except Exception as e:
-                logger.error(f"JSON parsing failed: {e}. Raw text snippet: {text[:200]}")
-                return {}
+                return match.group(0).replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n").replace("\t", "\\t")
+            cleaned = re.sub(r'"(?:[^"\\]|\\.)*"', fix_newlines, raw, flags=re.DOTALL)
+            return json.loads(cleaned, strict=False)
+        except Exception:
+            pass
+
+        # Strategy 3: Structured field extraction (fallback when LLM output contains nested quotes or unescaped markdown)
+        result = {}
+        try:
+            m_reasoning = re.search(r'"reasoning"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, flags=re.DOTALL)
+            if m_reasoning:
+                result["reasoning"] = m_reasoning.group(1).encode().decode('unicode_escape', errors='ignore')
+
+            m_code = re.search(r'"code"\s*:\s*(null|"(?:[^"\\]|\\.)*")', raw, flags=re.DOTALL)
+            if m_code:
+                code_val = m_code.group(1).strip()
+                if code_val == "null":
+                    result["code"] = None
+                else:
+                    result["code"] = code_val[1:-1].encode().decode('unicode_escape', errors='ignore')
+
+            m_answer = re.search(r'"answer"\s*:\s*"', raw)
+            if m_answer:
+                answer_start = m_answer.end()
+                last_quote = raw.rfind('"')
+                if last_quote > answer_start:
+                    answer_raw = raw[answer_start:last_quote]
+                    result["answer"] = answer_raw.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+
+            if "answer" in result or "code" in result:
+                return result
+        except Exception as e:
+            logger.warning(f"Structured field extraction failed: {e}")
+
+        # Strategy 4: If text is pure markdown answer without valid JSON keys, return as answer
+        if len(raw) > 10 and not raw.startswith('{"'):
+            return {"reasoning": "", "code": None, "answer": raw}
+
+        logger.error(f"JSON parsing failed on all strategies. Raw text snippet: {text[:200]}")
+        return {}
 
 
 # Single global instance

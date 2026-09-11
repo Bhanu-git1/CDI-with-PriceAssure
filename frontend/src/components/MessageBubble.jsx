@@ -3,13 +3,43 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import DataTable from './DataTable';
 import DataChart from './DataChart';
+import MermaidViewer from './MermaidViewer';
 import { getFollowUpSuggestions } from '../utils/suggestionHelper';
 import { sourceIcon } from './SourceSelector';
 
 function Markdown({ children }) {
   return (
     <div className="markdown-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children || ''}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ node, inline, className, children: codeChildren, ...props }) {
+            const match = /language-(\w+)/.exec(className || '');
+            const lang = match ? match[1].toLowerCase() : '';
+            const rawContent = String(codeChildren || '').replace(/\n$/, '');
+
+            if (
+              !inline &&
+              (lang === 'mermaid' ||
+                rawContent.startsWith('erDiagram') ||
+                rawContent.startsWith('graph ') ||
+                rawContent.startsWith('flowchart ') ||
+                rawContent.startsWith('sequenceDiagram') ||
+                rawContent.startsWith('classDiagram') ||
+                rawContent.startsWith('stateDiagram'))
+            ) {
+              return <MermaidViewer code={rawContent} />;
+            }
+            return (
+              <code className={className} {...props}>
+                {codeChildren}
+              </code>
+            );
+          }
+        }}
+      >
+        {children || ''}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -20,7 +50,8 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
     source_badge: sourceBadge, routing,
     needs_clarification: needsClarification, candidates,
   } = message;
-  const [activeTab, setActiveTab] = useState('answer'); // answer | table | chart
+  const wantsChart = Boolean(previousUserPrompt && /chart|pie|donut|plot|graph|distribution|visualize|breakdown/i.test(previousUserPrompt));
+  const [activeTab, setActiveTab] = useState(wantsChart ? 'chart' : 'answer'); // answer | table | chart
   const [showSql, setShowSql] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -70,6 +101,12 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
               >
                 📊 Table View
               </button>
+              <button
+                className={`vis-tab ${activeTab === 'chart' ? 'active' : ''}`}
+                onClick={() => setActiveTab('chart')}
+              >
+                🥧 Chart View
+              </button>
             </div>
 
             <div className="vis-content">
@@ -81,7 +118,7 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
               )}
 
               {activeTab === 'chart' && (
-                <DataChart data={data} />
+                <DataChart data={data} userPrompt={previousUserPrompt} />
               )}
             </div>
           </div>
