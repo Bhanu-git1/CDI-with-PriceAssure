@@ -11,14 +11,15 @@ from app.config import settings
 from app.datasources import registry
 from app.llm_service import llm_service, db_service
 from app.services.history_service import HistoryService
+from app.services.auth_service import AuthService
 
 # Configure standard console logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dce-fastapi-app")
 
-# Chat transcripts always live in DB 1, independent of which source a question
-# was answered from.
+# Chat transcripts and users always live in DB 1
 history_service = HistoryService(db_service)
+auth_service = AuthService(db_service)
 
 
 def _check_connections() -> list:
@@ -34,7 +35,7 @@ def _check_connections() -> list:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: log initial reachability and initialize history tables
+    # Startup: log initial reachability and initialize history and users tables
     logger.info(
         f"Initializing DCE workspace with {len(registry.ids())} data source(s): "
         f"{', '.join(registry.ids())}"
@@ -47,6 +48,11 @@ async def lifespan(app: FastAPI):
         await run_in_threadpool(history_service.init_db)
     except Exception as e:
         logger.warning(f"History service db init deferred or failed: {e}")
+
+    try:
+        await run_in_threadpool(auth_service.init_db)
+    except Exception as e:
+        logger.warning(f"Auth service db init deferred or failed: {e}")
 
     yield
 
@@ -120,7 +126,92 @@ class SyncLocalPayload(BaseModel):
     sessions: List[ChatSessionPayload]
 
 
+class RegisterRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    confirm_password: Optional[str] = None
+    role: Optional[str] = None
+
+    # Support camelCase names sent from React
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    userName: Optional[str] = None
+    confirmPassword: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    username: Optional[str] = None
+    userName: Optional[str] = None
+    userId: Optional[str] = None
+    password: Optional[str] = None
+
+
 # Endpoints
+
+# -------------------------------------------------------------
+# User Authentication & Registration Endpoints
+# -------------------------------------------------------------
+
+@app.get("/api/auth/check-username")
+async def check_username(username: str = Query(..., description="Username to verify")):
+    """
+    Check if a username is already taken.
+    """
+    exists = await run_in_threadpool(auth_service.check_username_exists, username)
+    return {"exists": exists, "username": username}
+
+
+@app.post("/api/auth/register")
+async def register_user_endpoint(payload: RegisterRequest):
+    """
+    Register a new user in the MySQL users table.
+    """
+    first_name = payload.first_name or payload.firstName
+    last_name = payload.last_name or payload.lastName
+    username = payload.username or payload.userName
+    password = payload.password
+    confirm_password = payload.confirm_password or payload.confirmPassword
+    role = payload.role
+
+    result = await run_in_threadpool(
+        auth_service.register_user,
+        first_name=first_name,
+        last_name=last_name,
+        username=username,
+        password=password,
+        confirm_password=confirm_password,
+        role=role
+    )
+
+    if not result.get("success"):
+        # If conflict / duplicate username
+        if "already taken" in result.get("error", "").lower() or "already exists" in result.get("error", "").lower():
+            raise HTTPException(status_code=409, detail=result.get("error"))
+        raise HTTPException(status_code=400, detail=result.get("error"))
+
+    return {"status": "success", "message": "User registered successfully", "user": result.get("user")}
+
+
+@app.post("/api/auth/login")
+async def login_user_endpoint(payload: LoginRequest):
+    """
+    Authenticate a user with username and password.
+    """
+    username = payload.username or payload.userName or payload.userId
+    password = payload.password
+
+    result = await run_in_threadpool(
+        auth_service.authenticate_user,
+        username=username,
+        password=password
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=401, detail=result.get("error", "Invalid username or password"))
+
+    return {"status": "success", "message": "Login successful", "user": result.get("user")}
 
 @app.get("/api/")
 @app.get("/api")

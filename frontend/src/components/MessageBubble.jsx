@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import DataTable from './DataTable';
@@ -44,16 +44,56 @@ function Markdown({ children }) {
   );
 }
 
-export default function MessageBubble({ message, onSelectSuggestion, previousUserPrompt, onPickSource }) {
+function formatUserDate(timestamp) {
+  const d = timestamp ? new Date(timestamp) : new Date();
+  if (isNaN(d.getTime())) {
+    return {
+      short: 'Today',
+      full: new Date().toLocaleString()
+    };
+  }
+  const short = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const full = d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+  return { short, full };
+}
+
+export default function MessageBubble({
+  message,
+  index,
+  onSelectSuggestion,
+  previousUserPrompt,
+  onPickSource,
+  onEditQuery,
+  onRetryQuery,
+  queryLoading
+}) {
   const {
     sender, text, sql, data, error, source,
     source_badge: sourceBadge, routing,
     needs_clarification: needsClarification, candidates,
+    timestamp
   } = message;
+
   const wantsChart = Boolean(previousUserPrompt && /chart|pie|donut|plot|graph|distribution|visualize|breakdown/i.test(previousUserPrompt));
   const [activeTab, setActiveTab] = useState(wantsChart ? 'chart' : 'answer'); // answer | table | chart
   const [showSql, setShowSql] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [copiedQuery, setCopiedQuery] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(text || '');
+
+  useEffect(() => {
+    setEditText(text || '');
+  }, [text]);
 
   const hasData = data && Array.isArray(data) && data.length > 0;
   const queryLabel = 'SQL Query';
@@ -61,21 +101,166 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
   const copySqlToClipboard = () => {
     if (!sql) return;
     navigator.clipboard.writeText(sql);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2000);
   };
 
-  // Suppress generic follow-ups while the assistant is waiting for the user to
-  // say which data source they meant — the only useful next action is choosing.
-  // Scoped to the source that answered, so a chip never moves the
-  // conversation to a different database without the user asking.
+  const handleCopyQuery = () => {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text);
+    }
+    setCopiedQuery(true);
+    setTimeout(() => setCopiedQuery(false), 2000);
+  };
+
+  const handleSaveEdit = () => {
+    const trimmed = editText.trim();
+    if (!trimmed || queryLoading) return;
+    setIsEditing(false);
+    if (onEditQuery) {
+      onEditQuery(trimmed, index);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditText(text || '');
+  };
+
+  const { short: dateShort, full: dateFull } = formatUserDate(timestamp);
+
+  // User query rendering with Claude-style options: Date, Copy, Edit, Retry
+  if (sender === 'user') {
+    return (
+      <div className="message-row user">
+        <div className="user-message-container">
+          {isEditing ? (
+            <div className="user-message-edit-card">
+              <textarea
+                className="user-message-edit-textarea"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSaveEdit();
+                  } else if (e.key === 'Escape') {
+                    handleCancelEdit();
+                  }
+                }}
+                rows={Math.min(6, Math.max(2, (editText || '').split('\n').length))}
+                autoFocus
+                placeholder="Edit your prompt..."
+              />
+              <div className="user-message-edit-footer">
+                <span className="user-edit-hint">Enter to submit • Shift+Enter for new line</span>
+                <div className="user-edit-actions-btns">
+                  <button
+                    type="button"
+                    className="user-edit-cancel-btn"
+                    onClick={handleCancelEdit}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="user-edit-submit-btn"
+                    onClick={handleSaveEdit}
+                    disabled={!editText.trim() || queryLoading}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="19" x2="12" y2="5" />
+                      <polyline points="5 12 12 5 19 12" />
+                    </svg>
+                    <span>Save & Submit</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="message-bubble">
+                <Markdown>{text}</Markdown>
+              </div>
+
+              {/* Claude-style User Query Actions Toolbar */}
+              <div className="user-query-toolbar">
+                {/* 1. Date (e.g. Sep 15) with hover tooltip for full date and time */}
+                <div className="user-query-date-pill" title={dateFull}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="user-date-icon">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                  <span className="user-date-text">{dateShort}</span>
+                </div>
+
+                <div className="user-toolbar-actions-group">
+                  {/* 2. Copy */}
+                  <button
+                    type="button"
+                    className="user-toolbar-btn"
+                    onClick={handleCopyQuery}
+                    title={copiedQuery ? 'Copied!' : 'Copy prompt'}
+                  >
+                    {copiedQuery ? (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="action-success-icon">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    )}
+                  </button>
+
+                  {/* 3. Edit */}
+                  <button
+                    type="button"
+                    className="user-toolbar-btn"
+                    onClick={() => {
+                      setIsEditing(true);
+                      setEditText(text || '');
+                    }}
+                    title="Edit prompt"
+                    disabled={queryLoading}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                  </button>
+
+                  {/* 4. Retry */}
+                  <button
+                    type="button"
+                    className="user-toolbar-btn"
+                    onClick={() => onRetryQuery && onRetryQuery(index)}
+                    title="Retry query"
+                    disabled={queryLoading}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Assistant response rendering
   const followUpSuggestions =
     sender === 'assistant' && !needsClarification
       ? getFollowUpSuggestions(previousUserPrompt, message.source_id || message.source_badge || message.source)
       : [];
 
-  // Badge class comes from the backend-declared badge, falling back to the
-  // label for transcripts saved before source_badge existed.
   const badgeKey = (sourceBadge || source || '').toLowerCase();
   const routingTitle = routing
     ? `Routed by ${routing.stage}` +
@@ -160,7 +345,7 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
                 <div className="sql-header">
                   <span>{queryLabel}</span>
                   <button onClick={copySqlToClipboard}>
-                    {copied ? 'Copied!' : `Copy ${queryLabel}`}
+                    {copiedSql ? 'Copied!' : `Copy ${queryLabel}`}
                   </button>
                 </div>
                 <pre className="sql-body">{sql}</pre>
@@ -231,4 +416,3 @@ export default function MessageBubble({ message, onSelectSuggestion, previousUse
     </div>
   );
 }
-

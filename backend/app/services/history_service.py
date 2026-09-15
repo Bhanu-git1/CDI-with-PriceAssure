@@ -82,7 +82,7 @@ class HistoryService:
             cursor = conn.cursor(dictionary=True)
 
             rows = []
-            if user_id and user_id.strip().lower() not in ("all", "*", "default_user", "guest", ""):
+            if user_id and user_id.strip() and user_id.strip().lower() not in ("all", "*"):
                 query_user = """
                     SELECT 
                         s.id, 
@@ -96,14 +96,12 @@ class HistoryService:
                     LEFT JOIN dce_chat_messages m ON s.id = m.session_id
                     WHERE LOWER(s.user_id) = LOWER(%s)
                     GROUP BY s.id, s.user_id, s.title, s.is_pinned, s.created_at, s.updated_at
-                    ORDER BY s.is_pinned DESC, s.updated_at DESC
+                    ORDER BY s.is_pinned DESC, s.created_at DESC, s.updated_at DESC
                     LIMIT %s OFFSET %s
                 """
                 cursor.execute(query_user, (user_id.strip(), limit, offset))
                 rows = cursor.fetchall()
-
-            # If no user was specified, or user returned no rows, fetch all sessions
-            if not rows:
+            else:
                 query_all = """
                     SELECT 
                         s.id, 
@@ -116,7 +114,7 @@ class HistoryService:
                     FROM dce_chat_sessions s
                     LEFT JOIN dce_chat_messages m ON s.id = m.session_id
                     GROUP BY s.id, s.user_id, s.title, s.is_pinned, s.created_at, s.updated_at
-                    ORDER BY s.is_pinned DESC, s.updated_at DESC
+                    ORDER BY s.is_pinned DESC, s.created_at DESC, s.updated_at DESC
                     LIMIT %s OFFSET %s
                 """
                 cursor.execute(query_all, (limit, offset))
@@ -124,14 +122,19 @@ class HistoryService:
 
             sessions = []
             for row in rows:
-                updated_iso = row["updated_at"].isoformat() if isinstance(row["updated_at"], datetime) else str(row["updated_at"])
-                created_iso = row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else str(row["created_at"])
+                updated_dt = row["updated_at"]
+                created_dt = row["created_at"]
+
+                updated_iso = (updated_dt.isoformat() + "Z") if isinstance(updated_dt, datetime) else str(updated_dt or "")
+                created_iso = (created_dt.isoformat() + "Z") if isinstance(created_dt, datetime) else str(created_dt or "")
+
                 sessions.append({
                     "id": row["id"],
                     "title": row["title"],
                     "isPinned": bool(row["is_pinned"]),
-                    "timestamp": updated_iso,
+                    "timestamp": created_iso or updated_iso,
                     "createdAt": created_iso,
+                    "updatedAt": updated_iso,
                     "messageCount": row["message_count"]
                 })
             return sessions

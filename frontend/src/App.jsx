@@ -16,10 +16,14 @@ const getApiEndpoint = () => {
 // How often to silently re-check backend/connection/LLM health in the background.
 const STATUS_POLL_MS = 15000;
 
-// Helper to load chat history from localStorage with backwards compatibility
-const loadSavedSessions = () => {
+// Helper to get user-scoped storage key
+const getHistoryStorageKey = (user) => `__dce_chat_history_${(user || 'guest').toLowerCase()}__`;
+
+// Helper to load chat history from localStorage with user scoping
+const loadSavedSessions = (user) => {
   try {
-    const saved = localStorage.getItem('__dce_chat_history__');
+    const key = getHistoryStorageKey(user);
+    const saved = localStorage.getItem(key);
     if (!saved) return [];
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed)) return [];
@@ -32,6 +36,14 @@ const loadSavedSessions = () => {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('__dce_current_user__') || null);
+  const [userProfile, setUserProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('__dce_user_profile__');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [queryLoading, setQueryLoading] = useState(false);
@@ -50,13 +62,17 @@ export default function App() {
   const [modelStatusOpen, setModelStatusOpen] = useState(true);
   const [promptHistoryOpen, setPromptHistoryOpen] = useState(true);
   const [currentChatId, setCurrentChatId] = useState(null);
-  const [chatHistory, setChatHistory] = useState(loadSavedSessions);
+  const [chatHistory, setChatHistory] = useState(() => {
+    const user = localStorage.getItem('__dce_current_user__');
+    return loadSavedSessions(user);
+  });
   const [historyLoading, setHistoryLoading] = useState(true);
   const [selectingChatId, setSelectingChatId] = useState(null);
   const [thinkMode, setThinkMode] = useState(false);
   const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0, session: null });
   const [editingChatId, setEditingChatId] = useState(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('__dce_dark_mode__') === 'true');
   const [toast, setToast] = useState(null);
 
   const apiEndpoint = getApiEndpoint();
@@ -85,17 +101,15 @@ export default function App() {
     };
   }, [contextMenu.open]);
 
-  const showToast = (msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+  const showToast = (message) => {
+    setToast(message);
+    setTimeout(() => {
+      setToast(null);
+    }, 2800);
   };
 
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, queryLoading]);
-
   const handleNewChat = () => {
+    if (queryLoading) return;
     setCurrentChatId(null);
     setMessages([]);
     setInputValue('');
@@ -161,84 +175,47 @@ export default function App() {
     }
   };
 
-  const fetchChatsFromBackend = async () => {
-    setHistoryLoading(true);
-    try {
-      const userParam = encodeURIComponent(currentUser || 'default_user');
-      const res = await fetch(`${apiEndpoint}/api/chats?user_id=${userParam}&limit=1000`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.sessions && Array.isArray(data.sessions)) {
-          setChatHistory(data.sessions);
-          try {
-            localStorage.setItem('__dce_chat_history__', JSON.stringify(data.sessions));
-            localStorage.removeItem('__dce_prompt_history__');
-          } catch (e) {}
-        }
-      }
-    } catch (err) {
-      console.warn("Backend chat history fetch fallback to local cache:", err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
-  const handleDeleteChat = async (id, e) => {
-    if (e) e.stopPropagation();
-    setChatHistory((prev) => {
-      const updated = prev.filter((c) => c.id !== id);
-      try {
-        localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-        localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
-      } catch (err) {
-        console.error("Failed to update chat history:", err);
-      }
-      return updated;
-    });
-    if (currentChatId === id) {
-      setCurrentChatId(null);
-      setMessages([]);
-    }
-    setContextMenu({ open: false, x: 0, y: 0, session: null });
-    showToast("Chat deleted");
-
-    try {
-      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { 'ngrok-skip-browser-warning': 'true' }
-      });
-    } catch (err) {
-      console.error("Failed to delete chat on backend:", err);
-    }
-  };
-
-  const handleOpenContextMenu = (e, session) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const menuWidth = 190;
-    const left = Math.min(rect.right + 4, window.innerWidth - menuWidth - 10);
-    const top = Math.min(rect.top - 10, window.innerHeight - 260);
-    setContextMenu({
-      open: true,
-      x: left,
-      y: top,
-      session
-    });
-  };
-
-  const handleShare = (session) => {
+  const handleShare = async (session) => {
     if (!session) return;
-    const summary = (session.messages || []).map(m => `${m.sender.toUpperCase()}: ${m.text || ''}`).join('\n\n');
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(summary || session.title);
-      showToast("Chat transcript copied to clipboard!");
-    } else {
-      showToast("Chat link ready to share");
-    }
     setContextMenu({ open: false, x: 0, y: 0, session: null });
+
+    let msgs = session.messages;
+    if (!msgs || msgs.length === 0) {
+      try {
+        const res = await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(session.id)}`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        if (res.ok) {
+          const fullSession = await res.json();
+          msgs = fullSession.messages || [];
+        }
+      } catch (err) {
+        console.warn("Could not load full chat transcript for sharing:", err);
+      }
+    }
+
+    let formattedTranscript = `=== Chat Conversation: ${session.title} ===\n\n`;
+    if (msgs && msgs.length > 0) {
+      formattedTranscript += msgs.map((m) => {
+        const role = m.sender === 'user' ? 'User' : 'Pharma Decision Intelligence';
+        const content = m.text || (m.sql ? `SQL Query:\n${m.sql}` : '');
+        return `[${role}]:\n${content}`;
+      }).join('\n\n----------------------------------------\n\n');
+    } else {
+      formattedTranscript += `Title: ${session.title}\nSession ID: ${session.id}`;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(formattedTranscript);
+        showToast("Conversation copied to clipboard!");
+        return;
+      } catch (err) {
+        console.warn("Clipboard copy failed, using fallback:", err);
+      }
+    }
+
+    showToast("Conversation ready to share");
   };
 
   const handleStartRename = (session) => {
@@ -257,8 +234,7 @@ export default function App() {
     setChatHistory((prev) => {
       const updated = prev.map((c) => (c.id === id ? { ...c, title: trimmed } : c));
       try {
-        localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-        localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
+        localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(updated));
       } catch (err) {
         console.error("Failed to save chat title:", err);
       }
@@ -287,8 +263,7 @@ export default function App() {
     setChatHistory((prev) => {
       const updated = prev.map((c) => (c.id === session.id ? { ...c, isPinned: isNowPinned } : c));
       try {
-        localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-        localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
+        localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(updated));
       } catch (err) {
         console.error("Failed to update pin state:", err);
       }
@@ -311,75 +286,215 @@ export default function App() {
     }
   };
 
-  const handleArchive = async (session) => {
+  const handleOpenContextMenu = (e, session) => {
     if (!session) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Determine position based on button clicked or cursor coordinates
+    const targetEl = e.currentTarget;
+    let x, y;
+    const menuWidth = 190;
+    const menuHeight = 175;
+
+    if (targetEl && targetEl.getBoundingClientRect) {
+      const rect = targetEl.getBoundingClientRect();
+      x = rect.right + 6;
+      y = rect.top;
+    } else {
+      x = e.clientX || 200;
+      y = e.clientY || 200;
+    }
+
+    // Keep within window viewport boundaries
+    if (x + menuWidth > window.innerWidth) {
+      if (targetEl && targetEl.getBoundingClientRect) {
+        const rect = targetEl.getBoundingClientRect();
+        x = Math.max(10, rect.left - menuWidth - 6);
+      } else {
+        x = Math.max(10, window.innerWidth - menuWidth - 10);
+      }
+    }
+    if (y + menuHeight > window.innerHeight) {
+      y = Math.max(10, window.innerHeight - menuHeight - 10);
+    }
+
+    if (contextMenu.open && contextMenu.session?.id === session.id) {
+      setContextMenu({ open: false, x: 0, y: 0, session: null });
+    } else {
+      setContextMenu({
+        open: true,
+        x,
+        y,
+        session
+      });
+    }
+  };
+
+  const handleDeleteChat = async (sessionId) => {
+    if (!sessionId) return;
     setChatHistory((prev) => {
-      const updated = prev.filter((c) => c.id !== session.id);
+      const updated = prev.filter((c) => c.id !== sessionId);
       try {
-        localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-        localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
+        localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(updated));
       } catch (err) {
-        console.error("Failed to archive chat:", err);
+        console.error("Failed to delete chat:", err);
       }
       return updated;
     });
-    if (currentChatId === session.id) {
+    if (currentChatId === sessionId) {
       setCurrentChatId(null);
       setMessages([]);
     }
     setContextMenu({ open: false, x: 0, y: 0, session: null });
-    showToast("Chat archived");
+    showToast("Chat deleted");
 
     try {
-      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(session.id)}`, {
+      await fetch(`${apiEndpoint}/api/chats/${encodeURIComponent(sessionId)}`, {
         method: 'DELETE',
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
     } catch (err) {
-      console.error("Failed to archive chat on backend:", err);
+      console.error("Failed to delete chat on backend:", err);
     }
   };
 
-  const groupChatsByDate = (items) => {
-    const groups = {};
-    const pinned = items.filter((i) => i.isPinned);
-    const unpinned = items.filter((i) => !i.isPinned);
+  const parseSessionCreatedDate = (session) => {
+    if (!session) return new Date();
 
-    if (pinned.length > 0) {
-      groups['Pinned'] = pinned;
+    // Prefer createdAt / created_at, then timestamp, then updatedAt
+    const raw = session.createdAt || session.created_at || session.timestamp || session.updated_at || session.updatedAt;
+
+    if (raw) {
+      if (typeof raw === 'number') {
+        return new Date(raw);
+      }
+      if (typeof raw === 'string') {
+        // If ISO string like 2026-09-15T09:25:30 without timezone offset, treat as UTC
+        const normalized = (raw.includes('T') && !raw.endsWith('Z') && !raw.includes('+') && !raw.slice(10).includes('-'))
+          ? raw + 'Z'
+          : raw;
+        const parsed = new Date(normalized);
+        if (!isNaN(parsed.getTime())) return parsed;
+        const parsedDirect = new Date(raw);
+        if (!isNaN(parsedDirect.getTime())) return parsedDirect;
+      }
     }
 
+    // Fallback to timestamp embedded in chat ID (chat-1789101854816-xxx)
+    if (session.id && typeof session.id === 'string') {
+      const match = session.id.match(/chat-(\d{10,13})/);
+      if (match) {
+        const epoch = parseInt(match[1], 10);
+        const parsed = new Date(epoch);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+    }
+
+    return new Date();
+  };
+
+  const getCalendarDayDifference = (sessionDate, nowDate = new Date()) => {
+    const dNow = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+    const dSession = new Date(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+    const diffMs = dNow.getTime() - dSession.getTime();
+    return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  };
+
+  const groupChatsByDate = (items) => {
+    if (!items || items.length === 0) return [];
+
+    // Parse created date for all sessions and sort descending (newest on top)
+    const parsedList = items.map((item) => ({
+      ...item,
+      _createdDate: parseSessionCreatedDate(item)
+    }));
+
+    parsedList.sort((a, b) => b._createdDate.getTime() - a._createdDate.getTime());
+
+    const pinned = parsedList.filter((i) => i.isPinned);
+    const unpinned = parsedList.filter((i) => !i.isPinned);
+
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfYesterday = startOfToday - 86400000;
-    const startOfSevenDays = startOfToday - 7 * 86400000;
+    const resultGroups = [];
+
+    // 1. Pinned group always on top
+    if (pinned.length > 0) {
+      resultGroups.push({
+        label: 'Pinned',
+        items: pinned
+      });
+    }
+
+    const todayItems = [];
+    const yesterdayItems = [];
+    const prev7DaysItems = [];
+    const prev30DaysItems = [];
+    const olderMonthMap = new Map();
 
     unpinned.forEach((item) => {
-      const date = new Date(item.timestamp);
-      const time = date.getTime();
-      let groupLabel = '';
+      const diffDays = getCalendarDayDifference(item._createdDate, now);
 
-      if (time >= startOfToday) {
-        groupLabel = 'Today';
-      } else if (time >= startOfYesterday) {
-        groupLabel = 'Yesterday';
-      } else if (time >= startOfSevenDays) {
-        groupLabel = 'Previous 7 Days';
+      if (diffDays <= 0) {
+        // Created Today (or future clock drift)
+        todayItems.push(item);
+      } else if (diffDays === 1) {
+        // Created Yesterday
+        yesterdayItems.push(item);
+      } else if (diffDays >= 2 && diffDays <= 7) {
+        // Created 2 to 7 days ago
+        prev7DaysItems.push(item);
+      } else if (diffDays >= 8 && diffDays <= 30) {
+        // Created 8 to 30 days ago
+        prev30DaysItems.push(item);
       } else {
-        groupLabel = date.toLocaleDateString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+        // Older by month & year
+        const d = item._createdDate;
+        const monthYearLabel = d.toLocaleDateString('en-US', {
+          month: 'long',
+          year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
         });
+        if (!olderMonthMap.has(monthYearLabel)) {
+          olderMonthMap.set(monthYearLabel, []);
+        }
+        olderMonthMap.get(monthYearLabel).push(item);
       }
-
-      if (!groups[groupLabel]) {
-        groups[groupLabel] = [];
-      }
-      groups[groupLabel].push(item);
     });
 
-    return groups;
+    if (todayItems.length > 0) resultGroups.push({ label: 'Today', items: todayItems });
+    if (yesterdayItems.length > 0) resultGroups.push({ label: 'Yesterday', items: yesterdayItems });
+    if (prev7DaysItems.length > 0) resultGroups.push({ label: 'Previous 7 Days', items: prev7DaysItems });
+    if (prev30DaysItems.length > 0) resultGroups.push({ label: 'Previous 30 Days', items: prev30DaysItems });
+
+    olderMonthMap.forEach((mItems, mLabel) => {
+      if (mItems.length > 0) {
+        resultGroups.push({ label: mLabel, items: mItems });
+      }
+    });
+
+    return resultGroups;
+  };
+
+  const fetchChatsFromBackend = async () => {
+    setHistoryLoading(true);
+    try {
+      const userParam = encodeURIComponent(currentUser || 'default_user');
+      const res = await fetch(`${apiEndpoint}/api/chats?user_id=${userParam}&limit=1000`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+        setChatHistory(sessions);
+        try {
+          localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(sessions));
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn("Backend chat history fetch fallback to local cache:", err);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   // Live backend/connection/LLM status check.
@@ -423,25 +538,29 @@ export default function App() {
 
   // `sourceOverride` lets a clarification chip re-send the same question pinned
   // to one data source, without changing the user's standing selection.
-  const handleSendMessage = async (textToSend, sourceOverride) => {
+  // `historyOverride` lets edit/retry truncate or supply a specific message sequence.
+  const handleSendMessage = async (textToSend, sourceOverride, historyOverride, chatIdOverride) => {
     const queryText = textToSend || inputValue;
     if (!queryText.trim()) return;
     const sourceForRequest = sourceOverride || selectedSource || 'auto';
 
-    let chatId = currentChatId;
+    let chatId = chatIdOverride || currentChatId;
     const isNewChat = !chatId;
     if (isNewChat) {
       chatId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setCurrentChatId(chatId);
     }
 
+    const baseHistory = historyOverride !== undefined ? historyOverride : messages;
     const userMsg = { sender: 'user', text: queryText, timestamp: new Date().toISOString() };
-    const updatedMessagesWithUser = [...messages, userMsg];
+    const updatedMessagesWithUser = [...baseHistory, userMsg];
     setMessages(updatedMessagesWithUser);
     setInputValue('');
     setQueryLoading(true);
 
-    let sessionTitle = queryText;
+    let sessionTitle = baseHistory.length > 0
+      ? (chatHistory.find((c) => c.id === chatId)?.title || baseHistory[0].text || queryText)
+      : queryText;
     let isPinnedState = false;
 
     // Save/update the session in chat history with user message
@@ -461,7 +580,7 @@ export default function App() {
       } else {
         const newChat = {
           id: chatId,
-          title: queryText,
+          title: sessionTitle,
           messages: updatedMessagesWithUser,
           timestamp,
           isPinned: false
@@ -469,8 +588,7 @@ export default function App() {
         updated = [newChat, ...prev];
       }
       try {
-        localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-        localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
+        localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(updated));
       } catch (err) {
         console.error("Failed to store chat history:", err);
       }
@@ -483,7 +601,7 @@ export default function App() {
     try {
       const requestBody = {
         message: queryText,
-        history: messages,
+        history: baseHistory,
         source: sourceForRequest
       };
 
@@ -537,8 +655,7 @@ export default function App() {
           return c;
         });
         try {
-          localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-          localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
+          localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(updated));
         } catch (err) {
           console.error("Failed to store chat history:", err);
         }
@@ -571,8 +688,7 @@ export default function App() {
           return c;
         });
         try {
-          localStorage.setItem('__dce_chat_history__', JSON.stringify(updated));
-          localStorage.setItem('__dce_prompt_history__', JSON.stringify(updated));
+          localStorage.setItem(getHistoryStorageKey(currentUser), JSON.stringify(updated));
         } catch (err) {
           console.error("Failed to store chat history:", err);
         }
@@ -585,20 +701,62 @@ export default function App() {
     }
   };
 
+  const handleEditQuery = async (newText, msgIndex) => {
+    if (queryLoading || !newText.trim()) return;
+    const priorHistory = messages.slice(0, msgIndex);
+    await handleSendMessage(newText, selectedSource, priorHistory, currentChatId);
+  };
+
+  const handleRetryQuery = async (msgIndex) => {
+    if (queryLoading) return;
+    const targetMsg = messages[msgIndex];
+    if (!targetMsg || !targetMsg.text) return;
+    const priorHistory = messages.slice(0, msgIndex);
+    await handleSendMessage(targetMsg.text, selectedSource, priorHistory, currentChatId);
+  };
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleSendMessage();
     }
   };
 
-  const handleLogin = (userId) => {
-    localStorage.setItem('__dce_current_user__', userId);
-    setCurrentUser(userId);
+  const handleLogin = (userPayload) => {
+    let username = '';
+    let profile = null;
+
+    if (typeof userPayload === 'object' && userPayload !== null) {
+      username = userPayload.username || userPayload.userName || 'User';
+      profile = userPayload;
+    } else {
+      username = String(userPayload || 'Guest');
+      profile = {
+        username: username,
+        first_name: username,
+        last_name: '',
+        full_name: username,
+        role: 'User'
+      };
+    }
+
+    localStorage.setItem('__dce_current_user__', username);
+    localStorage.setItem('__dce_user_profile__', JSON.stringify(profile));
+    setCurrentUser(username);
+    setUserProfile(profile);
+    setCurrentChatId(null);
+    setMessages([]);
+    setChatHistory(loadSavedSessions(username));
+    showToast(`Welcome, ${profile.first_name || username}!`);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('__dce_current_user__');
+    localStorage.removeItem('__dce_user_profile__');
     setCurrentUser(null);
+    setUserProfile(null);
+    setCurrentChatId(null);
+    setMessages([]);
+    setChatHistory([]);
   };
 
   if (!currentUser) {
@@ -617,7 +775,7 @@ export default function App() {
   const llmColor = statusToColor(llmStatus);
 
   return (
-    <div className="app-container">
+    <div className="app-container" data-theme={darkMode ? 'dark' : 'light'}>
       {/* Left Sidebar — backend connections, model info, account */}
       <aside className={`app-sidebar ${sidebarOpen ? 'sidebar-expanded' : 'sidebar-collapsed'}`}>
         {sidebarOpen ? (
@@ -795,9 +953,9 @@ export default function App() {
                         <span>No prompt history yet</span>
                       </div>
                     ) : (
-                      Object.entries(groupChatsByDate(chatHistory)).map(([groupLabel, items]) => (
-                        <div key={groupLabel} className="history-date-group">
-                          <div className="history-date-label">{groupLabel}</div>
+                      groupChatsByDate(chatHistory).map(({ label, items }) => (
+                        <div key={label} className="history-date-group">
+                          <div className="history-date-label">{label}</div>
                           <div className="history-items-list">
                             {items.map((session) => {
                               const isSessionLoading = selectingChatId === session.id;
@@ -839,23 +997,25 @@ export default function App() {
                                     </span>
                                   )}
 
-                                  {session.isPinned && !isSessionLoading && (
-                                    <svg className="history-item-pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" title="Pinned chat">
-                                      <line x1="12" y1="17" x2="12" y2="22" />
-                                      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.8l-1.78.89A2 2 0 0 0 5 15.24Z" />
-                                    </svg>
-                                  )}
+                                  <div className="history-item-actions">
+                                    {session.isPinned && !isSessionLoading && (
+                                      <svg className="history-item-pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" title="Pinned chat">
+                                        <line x1="12" y1="17" x2="12" y2="22" />
+                                        <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.8l-1.78.89A2 2 0 0 0 5 15.24Z" />
+                                      </svg>
+                                    )}
 
-                                  {!isSessionLoading && (
-                                    <button
-                                      type="button"
-                                      className="history-item-more-btn"
-                                      onClick={(e) => handleOpenContextMenu(e, session)}
-                                      title="More options"
-                                    >
-                                      •••
-                                    </button>
-                                  )}
+                                    {!isSessionLoading && (
+                                      <button
+                                        type="button"
+                                        className="history-item-more-btn"
+                                        onClick={(e) => handleOpenContextMenu(e, session)}
+                                        title="More options"
+                                      >
+                                        •••
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -876,13 +1036,21 @@ export default function App() {
 
             {/* Logged-in User */}
             <div className="sidebar-user">
-              <div className="user-avatar">{currentUser.charAt(0).toUpperCase()}</div>
+              <div className="user-avatar">{((userProfile?.first_name || currentUser || 'U').charAt(0)).toUpperCase()}</div>
               <div className="user-meta">
-                <span className="user-name">{currentUser}</span>
-                <span className="user-role">Signed in</span>
+                <span className="user-name" title={userProfile?.full_name || currentUser}>
+                  {userProfile?.full_name || (userProfile?.first_name ? `${userProfile.first_name} ${userProfile.last_name || ''}`.trim() : currentUser)}
+                </span>
+                <span className="user-role" title={userProfile?.role || 'User'}>
+                  {userProfile?.role ? `${userProfile.role} • @${currentUser}` : `@${currentUser}`}
+                </span>
               </div>
-              <button className="logout-icon-btn" onClick={handleLogout} title="Logout">
-                🚪
+              <button className="logout-icon-btn" onClick={handleLogout} title="Sign Out">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
               </button>
             </div>
           </>
@@ -980,9 +1148,9 @@ export default function App() {
               <div
                 className="sidebar-rail-user"
                 onClick={handleLogout}
-                title={`Signed in as ${currentUser} (Click to Logout)`}
+                title={`Signed in as ${userProfile?.full_name || currentUser} (${userProfile?.role || 'User'}). Click to Sign Out.`}
               >
-                <div className="user-avatar rail-avatar">{currentUser.charAt(0).toUpperCase()}</div>
+                <div className="user-avatar rail-avatar">{((userProfile?.first_name || currentUser || 'U').charAt(0)).toUpperCase()}</div>
               </div>
             </div>
           </div>
@@ -996,7 +1164,9 @@ export default function App() {
         <div className="messages-container">
           {messages.length === 0 ? (
             <div className="empty-state-gemini">
-              <h1 className="empty-state-greeting">What's on your mind today?</h1>
+              <h1 className="empty-state-greeting">
+                What's on your mind {userProfile?.first_name || userProfile?.username || currentUser || ''}?
+              </h1>
 
               {/* Central Pill Input Bar */}
               <div className="input-container pill-input hero-pill-input">
@@ -1017,6 +1187,37 @@ export default function App() {
                     onChange={setSelectedSource}
                     disabled={queryLoading}
                   />
+                  {/* Dark Mode Toggle */}
+                  <button
+                    type="button"
+                    className={`dark-mode-toggle-btn ${darkMode ? 'active' : ''}`}
+                    onClick={() => {
+                      const next = !darkMode;
+                      setDarkMode(next);
+                      localStorage.setItem('__dce_dark_mode__', String(next));
+                    }}
+                    title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                  >
+                    {darkMode ? (
+                      /* Sun icon */
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="5" />
+                        <line x1="12" y1="1" x2="12" y2="3" />
+                        <line x1="12" y1="21" x2="12" y2="23" />
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                        <line x1="1" y1="12" x2="3" y2="12" />
+                        <line x1="21" y1="12" x2="23" y2="12" />
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                      </svg>
+                    ) : (
+                      /* Moon icon */
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                      </svg>
+                    )}
+                  </button>
                   <button
                     type="button"
                     className={`input-wave-btn ${inputValue.trim() ? 'has-text' : ''}`}
@@ -1055,6 +1256,7 @@ export default function App() {
               return (
                 <MessageBubble
                   key={index}
+                  index={index}
                   message={msg}
                   previousUserPrompt={prevUserPrompt}
                   onSelectSuggestion={(query) => handleSendMessage(query)}
@@ -1062,6 +1264,9 @@ export default function App() {
                   onPickSource={(sourceId) =>
                     prevUserPrompt && handleSendMessage(prevUserPrompt, sourceId)
                   }
+                  onEditQuery={handleEditQuery}
+                  onRetryQuery={handleRetryQuery}
+                  queryLoading={queryLoading}
                 />
               );
             })
@@ -1107,6 +1312,35 @@ export default function App() {
                   onChange={setSelectedSource}
                   disabled={queryLoading}
                 />
+                {/* Dark Mode Toggle */}
+                <button
+                  type="button"
+                  className={`dark-mode-toggle-btn ${darkMode ? 'active' : ''}`}
+                  onClick={() => {
+                    const next = !darkMode;
+                    setDarkMode(next);
+                    localStorage.setItem('__dce_dark_mode__', String(next));
+                  }}
+                  title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+                >
+                  {darkMode ? (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="5" />
+                      <line x1="12" y1="1" x2="12" y2="3" />
+                      <line x1="12" y1="21" x2="12" y2="23" />
+                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                      <line x1="1" y1="12" x2="3" y2="12" />
+                      <line x1="21" y1="12" x2="23" y2="12" />
+                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                  )}
+                </button>
                 <button
                   type="button"
                   className={`input-wave-btn ${inputValue.trim() ? 'has-text' : ''}`}
@@ -1142,7 +1376,7 @@ export default function App() {
           style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Share */}
+          {/* 1. Share conversation */}
           <button
             type="button"
             className="context-menu-item"
@@ -1153,10 +1387,23 @@ export default function App() {
               <polyline points="16 6 12 2 8 6" />
               <line x1="12" y1="2" x2="12" y2="15" />
             </svg>
-            <span>Share</span>
+            <span>Share conversation</span>
           </button>
 
-          {/* Rename */}
+          {/* 2. Pin */}
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => handleTogglePin(contextMenu.session)}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="17" x2="12" y2="22" />
+              <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.8l-1.78.89A2 2 0 0 0 5 15.24Z" />
+            </svg>
+            <span>{contextMenu.session.isPinned ? 'Unpin' : 'Pin'}</span>
+          </button>
+
+          {/* 3. Rename */}
           <button
             type="button"
             className="context-menu-item"
@@ -1169,34 +1416,7 @@ export default function App() {
             <span>Rename</span>
           </button>
 
-          {/* Pin chat */}
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={() => handleTogglePin(contextMenu.session)}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="17" x2="12" y2="22" />
-              <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.89A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.8l-1.78.89A2 2 0 0 0 5 15.24Z" />
-            </svg>
-            <span>{contextMenu.session.isPinned ? 'Unpin chat' : 'Pin chat'}</span>
-          </button>
-
-          {/* Archive */}
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={() => handleArchive(contextMenu.session)}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="21 8 21 21 3 21 3 8" />
-              <rect x="1" y="3" width="22" height="5" />
-              <line x1="10" y1="12" x2="14" y2="12" />
-            </svg>
-            <span>Archive</span>
-          </button>
-
-          {/* Delete */}
+          {/* 4. Delete */}
           <button
             type="button"
             className="context-menu-item delete"
