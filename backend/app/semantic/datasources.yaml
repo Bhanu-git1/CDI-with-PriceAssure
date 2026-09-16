@@ -189,7 +189,7 @@ sources:
     badge: "gpo"
     aliases:
       - "memcot"
-      - "memcot"
+      - "memcot - mysql"
       - "memcot mysql"
       - "memcot db"
       - "memcot database"
