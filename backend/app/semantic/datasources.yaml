@@ -48,7 +48,7 @@ sources:
     # short_label is what the UI shows — sidebar, source selector, answer badge.
     # Kept free of the engine name ("MySQL"): which engine backs a source is an
     # implementation detail, not something a user picks between.
-    short_label: "Commercial - mySQL"
+    short_label: "Commercial"
     kind: mysql
     enabled: true
     # Higher priority wins a dead-even tie. Preserves the pre-existing
@@ -180,7 +180,7 @@ sources:
   # ===================================================================
   - id: mysql_gpo
     label: "memCOT - mySQL Customer Roster Validation"
-    short_label: "memCOT - mySQL"
+    short_label: "memCOT"
     kind: mysql
     enabled: true
     priority: 10
@@ -189,7 +189,7 @@ sources:
     badge: "gpo"
     aliases:
       - "memcot"
-      - "memcot - mysql"
+      - "memcot"
       - "memcot mysql"
       - "memcot db"
       - "memcot database"
