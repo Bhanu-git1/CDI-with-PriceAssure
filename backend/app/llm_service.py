@@ -546,9 +546,25 @@ class LLMService:
             code = parsed.get("code")
             answer = parsed.get("answer")
 
+            # Guard: if the answer field accidentally contains the LLM's raw
+            # reasoning/chain-of-thought (happens when JSON parsing fails and
+            # Strategy 4 is too generous), replace it with a safe fallback so
+            # the user never sees internal model monologue.
+            if answer:
+                leak_signals = (
+                    '"reasoning"', '"code"', 'I checked the semantic',
+                    'The user wants', 'I will (1)', 'Step 1:', 'Step 2:',
+                )
+                if any(sig in answer for sig in leak_signals):
+                    logger.warning(
+                        f"Reasoning leak detected in answer field (source={ctx.id}). "
+                        "Clearing answer to force safe fallback."
+                    )
+                    answer = None
+
             if not (code and str(code).strip()):
                 return {
-                    "answer": answer or "I couldn't process that query.",
+                    "answer": answer or "I couldn't find relevant data for that query. Please try rephrasing or be more specific.",
                     "sql": None, "data": None, "error": None,
                 }
 
@@ -904,7 +920,10 @@ class LLMService:
         )
         for block in response.content:
             if block.type == "text":
-                return block.text.strip()
+                text = block.text.strip()
+                # Strip any extended-thinking / <thinking> blocks Claude may emit
+                text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
+                return text
         return ""
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
@@ -965,9 +984,19 @@ class LLMService:
         except Exception as e:
             logger.warning(f"Structured field extraction failed: {e}")
 
-        # Strategy 4: If text is pure markdown answer without valid JSON keys, return as answer
-        if len(raw) > 10 and not raw.startswith('{"'):
-            return {"reasoning": "", "code": None, "answer": raw}
+        # Strategy 4: If text looks like a plain markdown/natural-language answer
+        # (no JSON structure at all), treat it as the answer field — but only when
+        # it doesn't contain reasoning-style keywords that indicate the LLM dumped
+        # its thinking. If it looks like a failed JSON parse of a reasoning block,
+        # return empty so the pipeline uses the safe fallback message instead.
+        reasoning_leak_signals = (
+            '"reasoning"', '"code"', 'I checked', 'I will ', 'Let me ',
+            'Step 1', 'Step 2', 'First, ', 'The user wants',
+        )
+        if len(raw) > 10 and not raw.startswith('{'):
+            # Looks like genuine prose — safe to return as answer
+            if not any(sig in raw for sig in reasoning_leak_signals):
+                return {"reasoning": "", "code": None, "answer": raw}
 
         logger.error(f"JSON parsing failed on all strategies. Raw text snippet: {text[:200]}")
         return {}
