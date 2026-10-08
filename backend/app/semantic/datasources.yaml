@@ -120,6 +120,16 @@ sources:
         - Product_Master
         - rep_details
         - rep_master
+        - dim_product
+        - dim_time
+        - fact_hcp_cohort
+        - fact_market_performance
+        - fact_rep_activity
+        - fact_patient_journey
+        - fact_digital_engagement
+        - fact_ai_risk
+        - fact_milestone
+        - fact_nba
       # Verbatim from the previous MYSQL_PRIORITY_KEYWORDS tuple, so
       # existing prompts route exactly as they did before.
       strong_keywords:
@@ -133,6 +143,13 @@ sources:
         - rejections
         - pharmacy
         - engagement
+        - nba
+        - next best action
+        - cohort
+        - market_performance
+        - patient_journey
+        - ai_risk
+        - milestone
         - mysql
         - prescriber
         - npi
@@ -401,6 +418,7 @@ sources:
       entities:
         - Doctor__c
         - Rep_Details__c
+        - Cohort_Alert_Details__c
       # Verbatim from the previous SALESFORCE_KEYWORDS tuple.
       strong_keywords:
         - salesforce
@@ -416,6 +434,11 @@ sources:
         - rep managers
         - hcp status
         - state license
+        - cohort alert
+        - cohort alert details
+        - cohort_alert_details__c
+        - ai confidence score
+        - ai_confidence_score__c
         - crm
         - soql
         - sosl
@@ -424,6 +447,91 @@ sources:
         - specialty
         - practice state
         - license
+      exclude_keywords: []
+
+  # ===================================================================
+  # DB 3 — DataSure Database
+  # ===================================================================
+  - id: mysql_datasure
+    label: "DataSure Database"
+    short_label: "DataSure"
+    kind: mysql
+    enabled: true
+    priority: 10
+    badge: "datasure"
+    aliases:
+      - "datasure"
+      - "data_sure"
+      - "data sure"
+      - "data sure db"
+      - "datasure db"
+      - "database 3"
+      - "db3"
+      - "db 3"
+    connection:
+      host_env: DataSure_MYSQL_HOST
+      port_env: DataSure_MYSQL_PORT
+      user_env: DataSure_MYSQL_USER
+      password_env: DataSure_MYSQL_PASSWORD
+      database_env: DataSure_MYSQL_DATABASE
+      pool_name: dce_pool_datasure
+      read_only: true
+    semantic:
+      model_file: Data_sure.yaml
+      style: semantic_model
+      trim_strategy: budgeted
+      max_chars: 5000
+      max_cols_per_table: 30
+    sandbox_global: datasure
+    dialect: mysql
+    exclude_tables:
+      - dce_chat_sessions
+      - dce_chat_messages
+    capabilities:
+      cross_table_search: true
+    routing:
+      domain: >
+        DataSure database containing metadata catalog, source system definitions,
+        ETL jobs, column mappings, tie-out reconciliation master configurations,
+        execution logs, schedules, mismatch & missing data, and audit logs.
+      entities:
+        - datasure_metadata
+        - etl_column_mappings
+        - etl_jobs
+        - source_systems
+        - tie_out_config_master
+        - tieout_config
+        - tieout_audit_log
+        - tieout_execution_log
+        - tieout_mismatchdata
+        - tieout_missingdata
+        - tieout_schedule
+      strong_keywords:
+        - datasure
+        - data_sure
+        - data sure
+        - etl
+        - etl_jobs
+        - etl_column_mappings
+        - source_systems
+        - tie_out
+        - tieout
+        - tie_out_config_master
+        - tieout_config
+        - tieout_execution_log
+        - tieout_schedule
+        - tieout_mismatchdata
+        - tieout_missingdata
+        - tieout_audit_log
+        - datasure_metadata
+      weak_keywords:
+        - src_table
+        - tgt_table
+        - src_column
+        - tgt_column
+        - reconciliation
+        - mismatch
+        - missingdata
       exclude_keywords: []
 
 # =====================================================================

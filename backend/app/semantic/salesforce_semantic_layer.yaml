@@ -86,35 +86,67 @@ objects:
         label: "Phone Number"
         type: "phone"
         description: "Contact phone number of the Sales Representative."
-  Rep_Details__c:
-    label: "Sales Representative Details"
-    aliases:
-      - "Rep_Detials__c"
-      - "HCP_Rep_Detail__c"
-    description: "Contains Sales Representative details assigned to manage HCP/Doctor relationships."
+  Cohort_Alert_Details__c:
+    label: "Cohort Alert Details"
+    description: "Custom object storing cohort alert details, AI risk scores, and Next Best Action recommendations for UC6."
     primary_key: "Id"
-    custom_id_field: "Rep_Id__c"
+    custom_id_field: "Cohort_ID__c"
     fields:
-      Rep_Id__c:
-        label: "Rep ID"
+      AI_Confidence_Score__c:
+        label: "AI Confidence Score"
+        type: "percent"
+        description: "AI confidence score percentage (Percent 18, 0)."
+      Name:
+        label: "Cohort Alert Details Name"
         type: "string"
-        description: "Unique identifier for the Sales Representative."
-      First_Name__c:
-        label: "First Name"
+        description: "Auto Number identifier."
+      Cohort_ID__c:
+        label: "Cohort ID"
         type: "string"
-        description: "First name of the Sales Representative."
-      Last_Name__c:
-        label: "Last Name"
-        type: "string"
-        description: "Last name of the Sales Representative."
-      Email__c:
-        label: "Email"
+        description: "External ID, Unique Case Insensitive (Text 10)."
+      CreatedById:
+        label: "Created By"
+        type: "reference"
+        reference_to: "User"
+        description: "Lookup to User who created the record."
+      HCP_Email__c:
+        label: "HCP Email"
         type: "email"
-        description: "Email address of the Sales Representative."
-      Phone_Number__c:
-        label: "Phone Number"
-        type: "phone"
-        description: "Contact phone number of the Sales Representative."
+        description: "Email address of the Healthcare Professional."
+      HCP_ID__c:
+        label: "HCP ID"
+        type: "string"
+        description: "Identifier of the Healthcare Professional (Text 10)."
+      HCP_Name__c:
+        label: "HCP Name"
+        type: "string"
+        description: "Full name of the Healthcare Professional (Text 45)."
+      Issue__c:
+        label: "Issue"
+        type: "textarea"
+        description: "Detailed description of the issue (Long Text Area 32768)."
+      LastModifiedById:
+        label: "Last Modified By"
+        type: "reference"
+        reference_to: "User"
+        description: "Lookup to User who last modified the record."
+      Month_Key__c:
+        label: "Month Key"
+        type: "number"
+        description: "Time key for month (Number 18, 0)."
+      OwnerId:
+        label: "Owner"
+        type: "reference"
+        reference_to: "User,Group"
+        description: "Lookup to User or Group owner."
+      Product_Name__c:
+        label: "Product Name"
+        type: "string"
+        description: "Product brand name (Text 45)."
+      Recommendation__c:
+        label: "Recommendation"
+        type: "textarea"
+        description: "Next Best Action recommendation (Long Text Area 32768)."
 
 relationships:
   - name: "Doctor_to_Rep"

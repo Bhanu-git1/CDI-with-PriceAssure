@@ -36,3 +36,4 @@ backend/scripts/gpo_schema_dump.json
 # Test caches
 .pytest_cache/
 
+.env

@@ -593,6 +593,183 @@ semantic_model:
             - name: phone
               type: string
 
+        # =====================================================
+        # UC6: NEXT BEST ACTION (NBA) & COHORT INTELLIGENCE
+        # =====================================================
+        - name: dim_product
+          description: "UC6 dimension table: Product catalog storing Product_ID, Product_Name, Brand, and Therapeutic_Area."
+          columns:
+            - name: Product_ID
+              type: primary_key
+            - name: Product_Name
+              type: string
+            - name: Brand
+              type: string
+            - name: Therapeutic_Area
+              type: string
+
+        - name: dim_time
+          description: "UC6 dimension table: Time dimension storing Month_Key, Year, Month, Month_Start_Date, and Quarter."
+          columns:
+            - name: Month_Key
+              type: primary_key
+            - name: Year
+              type: integer
+            - name: Month
+              type: string
+            - name: Month_Start_Date
+              type: date
+            - name: Quarter
+              type: string
+
+        - name: fact_hcp_cohort
+          description: "UC6 fact table: Main HCP cohort grouping table linking HCPs, products, time keys, and created dates."
+          columns:
+            - name: Cohort_ID
+              type: primary_key
+            - name: Created_Date
+              type: date
+            - name: id
+              type: integer
+              references: hcp_master.id
+            - name: Product_ID
+              type: string
+              references: dim_product.Product_ID
+            - name: Month_Key
+              type: integer
+              references: dim_time.Month_Key
+
+        - name: fact_market_performance
+          description: "UC6 fact table: Market performance metrics including TRx, NRx, and Market_Share linked to Cohort_ID."
+          columns:
+            - name: Market_ID
+              type: primary_key
+            - name: TRx
+              type: string
+            - name: NRx
+              type: string
+            - name: Market_Share
+              type: string
+            - name: Performance_Date
+              type: date
+            - name: Cohort_ID
+              type: string
+              references: fact_hcp_cohort.Cohort_ID
+
+        - name: fact_rep_activity
+          description: "UC6 fact table: Sales representative interactions including Call_Count, Visit_Count, Sample_Count, CLM_Count, and Speaker_Program_Count per Cohort_ID."
+          columns:
+            - name: Activity_ID
+              type: primary_key
+            - name: Call_Count
+              type: integer
+            - name: Visit_Count
+              type: integer
+            - name: Sample_Count
+              type: integer
+            - name: Event_Date
+              type: date
+            - name: Cohort_ID
+              type: string
+              references: fact_hcp_cohort.Cohort_ID
+            - name: CLM_Count
+              type: integer
+            - name: Speaker_Program_Count
+              type: integer
+
+        - name: fact_patient_journey
+          description: "UC6 fact table: Longitudinal patient journey metrics including Diagnosis_Date, Therapy_Start_Date, Persistence_Days, Adherence_Score per Cohort_ID."
+          columns:
+            - name: Journey_ID
+              type: primary_key
+            - name: Diagnosis_Date
+              type: date
+            - name: Therapy_Start_Date
+              type: date
+            - name: Persistence_Days
+              type: integer
+            - name: Cohort_ID
+              type: string
+              references: fact_hcp_cohort.Cohort_ID
+            - name: Patient_ID
+              type: string
+            - name: Therapy_Stop_Date
+              type: date
+            - name: Adherence_Score
+              type: integer
+
+        - name: fact_digital_engagement
+          description: "UC6 fact table: Digital channel engagement metrics including Email_Sent, Email_Open, Click_Count, Webinar_Attended per Cohort_ID."
+          columns:
+            - name: Engagement_ID
+              type: primary_key
+            - name: Email_Sent
+              type: string
+            - name: Email_Open
+              type: string
+            - name: Click_Count
+              type: integer
+            - name: Webinar_Attended
+              type: integer
+            - name: Engagement_Date
+              type: date
+            - name: Cohort_ID
+              type: string
+              references: fact_hcp_cohort.Cohort_ID
+
+        - name: fact_ai_risk
+          description: "UC6 fact table: AI risk scoring table including Risk_Score, Leakage_Risk_Score, Fatigue_Score, Risk_Level per Cohort_ID."
+          columns:
+            - name: Risk_ID
+              type: primary_key
+            - name: Risk_Score
+              type: string
+            - name: Leakage_Risk_Score
+              type: string
+            - name: Fatigue_Score
+              type: string
+            - name: Risk_Level
+              type: string
+            - name: Risk_Date
+              type: date
+            - name: Cohort_ID
+              type: string
+              references: fact_hcp_cohort.Cohort_ID
+
+        - name: fact_milestone
+          description: "UC6 fact table: Triggers and milestone tracking including Trigger_Type, Trigger_Date, Milestone_Status linked to Risk_ID."
+          columns:
+            - name: Milestone_ID
+              type: primary_key
+            - name: Trigger_Type
+              type: string
+            - name: Trigger_Date
+              type: date
+            - name: Milestone_Status
+              type: string
+            - name: Risk_ID
+              type: string
+              references: fact_ai_risk.Risk_ID
+
+        - name: fact_nba
+          description: "UC6 fact table: Next Best Action (NBA) recommendations including Recommendation, Priority, Confidence_Score, Suggested_Date, Cohort_Status linked to Milestone_ID."
+          columns:
+            - name: NBA_ID
+              type: primary_key
+            - name: Recommendation
+              type: string
+            - name: Priority
+              type: string
+            - name: Confidence_Score
+              type: string
+            - name: Suggested_Date
+              type: date
+            - name: Milestone_ID
+              type: string
+              references: fact_milestone.Milestone_ID
+            - name: Cohort_Status
+              type: string
+
   # ============================================================
   # VERIFIED JOIN PATHS (Only joins confirmed to return data)
   # ============================================================
@@ -638,6 +815,67 @@ semantic_model:
       right_table: Product_Master
       join_condition: "Leakage_Activity.productid = Product_Master.product_id"
       description: "Enriches leakage records with full product catalog details."
+
+    # --- UC6 Join Paths ---
+    - name: cohort_to_hcp
+      left_table: fact_hcp_cohort
+      right_table: hcp_master
+      join_condition: "fact_hcp_cohort.id = hcp_master.id"
+      description: "Resolves HCP master details for HCP cohorts."
+
+    - name: cohort_to_product
+      left_table: fact_hcp_cohort
+      right_table: dim_product
+      join_condition: "fact_hcp_cohort.Product_ID = dim_product.Product_ID"
+      description: "Resolves product name, brand, and therapeutic area for cohorts."
+
+    - name: cohort_to_time
+      left_table: fact_hcp_cohort
+      right_table: dim_time
+      join_condition: "fact_hcp_cohort.Month_Key = dim_time.Month_Key"
+      description: "Resolves month, year, and quarter for cohorts."
+
+    - name: market_to_cohort
+      left_table: fact_market_performance
+      right_table: fact_hcp_cohort
+      join_condition: "fact_market_performance.Cohort_ID = fact_hcp_cohort.Cohort_ID"
+      description: "Links market performance (TRx, NRx, share) to HCP cohort."
+
+    - name: activity_to_cohort
+      left_table: fact_rep_activity
+      right_table: fact_hcp_cohort
+      join_condition: "fact_rep_activity.Cohort_ID = fact_hcp_cohort.Cohort_ID"
+      description: "Links sales representative activities to HCP cohort."
+
+    - name: journey_to_cohort
+      left_table: fact_patient_journey
+      right_table: fact_hcp_cohort
+      join_condition: "fact_patient_journey.Cohort_ID = fact_hcp_cohort.Cohort_ID"
+      description: "Links patient journey and adherence metrics to HCP cohort."
+
+    - name: digital_to_cohort
+      left_table: fact_digital_engagement
+      right_table: fact_hcp_cohort
+      join_condition: "fact_digital_engagement.Cohort_ID = fact_hcp_cohort.Cohort_ID"
+      description: "Links digital engagement logs (emails, webinars, clicks) to HCP cohort."
+
+    - name: risk_to_cohort
+      left_table: fact_ai_risk
+      right_table: fact_hcp_cohort
+      join_condition: "fact_ai_risk.Cohort_ID = fact_hcp_cohort.Cohort_ID"
+      description: "Links AI risk score, leakage risk score, and fatigue score to HCP cohort."
+
+    - name: milestone_to_risk
+      left_table: fact_milestone
+      right_table: fact_ai_risk
+      join_condition: "fact_milestone.Risk_ID = fact_ai_risk.Risk_ID"
+      description: "Links milestone triggers and status to AI risk assessment."
+
+    - name: nba_to_milestone
+      left_table: fact_nba
+      right_table: fact_milestone
+      join_condition: "fact_nba.Milestone_ID = fact_milestone.Milestone_ID"
+      description: "Links Next Best Action (NBA) recommendations and priorities to milestones."
 
   # ============================================================
   # BUSINESS TO DATABASE MAPPING RULES (STRICT)
@@ -801,3 +1039,36 @@ semantic_model:
     - name: pending_salesforce_sync_records
       description: "HCP records pending or failed in Salesforce CRM sync"
       sql: "SELECT sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sync_status, sync_message FROM salesforce_sync_log WHERE sync_status != 'Synced'"
+
+    # --- UC6: Next Best Action (NBA) & Cohort Intelligence ---
+    - name: nba_recommendations_summary
+      description: "Top Next Best Action recommendations with priority, confidence score, trigger type, and risk level"
+      sql: "SELECT fna.NBA_ID, fna.Recommendation, fna.Priority, fna.Confidence_Score, fna.Suggested_Date, fna.Cohort_Status, fm.Trigger_Type, far.Risk_Level FROM fact_nba fna JOIN fact_milestone fm ON fna.Milestone_ID = fm.Milestone_ID JOIN fact_ai_risk far ON fm.Risk_ID = far.Risk_ID ORDER BY fna.Suggested_Date DESC"
+
+    - name: hcp_cohort_risk_overview
+      description: "HCP cohort risk overview including product brand, month/year, risk score, leakage risk, and fatigue score"
+      sql: "SELECT fhc.Cohort_ID, fhc.Created_Date, dp.Product_Name, dp.Brand, dt.Month, dt.Year, far.Risk_Score, far.Leakage_Risk_Score, far.Fatigue_Score, far.Risk_Level FROM fact_hcp_cohort fhc JOIN dim_product dp ON fhc.Product_ID = dp.Product_ID JOIN dim_time dt ON fhc.Month_Key = dt.Month_Key JOIN fact_ai_risk far ON fhc.Cohort_ID = far.Cohort_ID ORDER BY far.Risk_Score DESC"
+
+    - name: rep_activity_by_cohort
+      description: "Aggregated sales representative activities by cohort"
+      sql: "SELECT Cohort_ID, SUM(Call_Count) as total_calls, SUM(Visit_Count) as total_visits, SUM(Sample_Count) as total_samples, SUM(CLM_Count) as total_clm, SUM(Speaker_Program_Count) as total_speaker_programs FROM fact_rep_activity GROUP BY Cohort_ID"
+
+    - name: digital_engagement_by_cohort
+      description: "Digital engagement activity metrics summarized by cohort"
+      sql: "SELECT Cohort_ID, SUM(CAST(Email_Sent AS UNSIGNED)) as total_email_sent, SUM(CAST(Email_Open AS UNSIGNED)) as total_email_open, SUM(Click_Count) as total_clicks, SUM(Webinar_Attended) as total_webinars FROM fact_digital_engagement GROUP BY Cohort_ID"
+
+    - name: hcp_cohort_overview
+      description: "Gets the full list of cohorts with HCP names and products."
+      sql: "SELECT c.Cohort_ID, CONCAT(h.hcp_firstName, ' ', h.hcp_lastName) as HCP_Name, p.Product_Name, c.Cohort_ID as Cohort_Type FROM fact_hcp_cohort c JOIN hcp_master h ON c.id = h.id JOIN dim_product p ON c.Product_ID = p.Product_ID"
+
+    - name: cohort_ai_risks
+      description: "Gets AI risk levels and fatigue scores per cohort."
+      sql: "SELECT Cohort_ID, Risk_Score, Fatigue_Score, Risk_Level, Risk_Date FROM fact_ai_risk ORDER BY Risk_Date DESC"
+
+    - name: cohort_nba_recommendations
+      description: "Gets next best actions and AI recommendations for cohorts."
+      sql: "SELECT n.NBA_ID, m.Trigger_Type as Issue, n.Recommendation, n.Priority, n.Confidence_Score FROM fact_nba n JOIN fact_milestone m ON n.Milestone_ID = m.Milestone_ID"
+
+    - name: cohort_market_decline_nba
+      description: "Gets cohorts created in 2026 with low Market Share or NRx, showing quarter, fatigue score, and NBA recommendation."
+      sql: "SELECT c.Cohort_ID, t.Month, t.Quarter, r.Fatigue_Score, n.Recommendation, n.Suggested_Date FROM fact_hcp_cohort c JOIN dim_time t ON c.Month_Key = t.Month_Key JOIN fact_market_performance mp ON c.Cohort_ID = mp.Cohort_ID JOIN fact_ai_risk r ON c.Cohort_ID = r.Cohort_ID JOIN fact_milestone m ON r.Risk_ID = m.Risk_ID JOIN fact_nba n ON m.Milestone_ID = n.Milestone_ID WHERE t.Year = 2026 AND (CAST(REPLACE(mp.Market_Share, '%', '') AS DECIMAL(10,2)) < 30 OR CAST(mp.NRx AS UNSIGNED) < 50)"

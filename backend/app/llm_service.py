@@ -27,12 +27,13 @@ semantic_loader = _primary_ctx.semantic
 
 SYSTEM_PROMPT = """
 You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
-The database powers a Pharma Commercial Command Centre with 5 integrated Use Cases:
+The database powers a Pharma Commercial Command Centre with 6 integrated Use Cases:
   - UC1: Leakage Signals (Leakage_Activity, leakage_history, Reverse_Claims, Compliance_Table)
   - UC2: Journey Orchestration & HCP Fatigue (fatigue_score, hcp_engagement_logs, campaign_master)
   - UC3: Voice Work Detail Manager & HCP Interaction Recording (hcp_master_details, hcp_master_workdetails_history, rep_details)
   - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History)
   - UC5: Salesforce Integration & Sync Audit (hcp_master_details, Tablet_Extract_History)
+  - UC6: Next Best Action (NBA) & Cohort Intelligence (dim_product, dim_time, fact_hcp_cohort, fact_market_performance, fact_rep_activity, fact_patient_journey, fact_digital_engagement, fact_ai_risk, fact_milestone, fact_nba)
 
 UI DASHBOARD displays data from PRIMARY TABLES:
   1. Leakage_Activity (60 rows) — Main leakage records table (UC1)
@@ -45,6 +46,7 @@ UI DASHBOARD displays data from PRIMARY TABLES:
   8. Transcript_Extraction_History (48 rows) — UC4 transcript extraction log (id, hcp_detail_id, Prescriber_NPI, sf_id, transcript_text, tablet_names, status, created_at)
   9. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
   10. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
+  11. fact_nba & fact_hcp_cohort — UC6 Next Best Action & HCP Cohort Intelligence tables (NBA_ID, Recommendation, Priority, Confidence_Score, Suggested_Date, Cohort_ID, Risk_Score, Risk_Level, Trigger_Type)
 
 RULES:
 - ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
@@ -52,21 +54,23 @@ RULES:
 - For ALL claims and rejection queries, use `Leakage_Activity`.
 - For ALL medicine, tablet, drug extraction queries (UC4), use `Tablet_Extract_History` or `Transcript_Extraction_History` (joined with `hcp_master_details` on `Prescriber_NPI` to get HCP name: `CONCAT(hmd.hcp_firstName, ' ', hmd.hcp_lastName) AS HCP_Name`).
 - For Salesforce CRM sync/push audit queries (UC5), use `hcp_master_details` (sf_id, status, updated_at) or `Tablet_Extract_History` (sf_id, status, message).
+- For ALL UC6 Next Best Action (NBA), AI risk score, cohort performance, patient journey, and milestone queries, use `fact_nba`, `fact_ai_risk`, `fact_hcp_cohort`, `fact_market_performance`, `fact_patient_journey`, `fact_rep_activity`, `fact_digital_engagement`, `fact_milestone`, `dim_product`, and `dim_time`.
 - Use standard MySQL SQL syntax.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 - DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, data structure, flowchart, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of table relationships and join keys. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
 """
 
-# UC3 (Salesforce) system prompt — reused verbatim from the standalone DCE Salesforce project.
+# UC3 & UC6 (Salesforce) system prompt.
 SALESFORCE_SYSTEM_PROMPT = """
 You generate Python code to fetch and analyze data from a MySQL database using the Semantic YAML governance rules.
-The database powers a Pharma Commercial Command Centre with 5 integrated Use Cases:
+The database powers a Pharma Commercial Command Centre with 6 integrated Use Cases:
   - UC1: Leakage Signals (Leakage_Activity, leakage_history, Reverse_Claims, Compliance_Table)
   - UC2: Journey Orchestration & HCP Fatigue (fatigue_score, hcp_engagement_logs, campaign_master)
   - UC3: Voice Work Detail Manager & HCP Interaction Recording (hcp_master_details, hcp_master_workdetails_history, rep_details)
   - UC4: Clinical Medicine Extraction & Guideline Analysis (Tablet_Extract_History, Transcript_Extraction_History, medicine_extraction_log)
   - UC5: Salesforce Integration & Sync Audit (salesforce_sync_log , Tablet_Extract_History, hcp_master_details)
+  - UC6: Next Best Action (NBA) & Cohort Intelligence (Cohort_Alert_Details__c, fact_nba, fact_ai_risk, fact_hcp_cohort)
 
 UI DASHBOARD displays data from PRIMARY TABLES:
   1. Leakage_Activity (60 rows) — Main leakage records table (UC1)
@@ -81,6 +85,7 @@ UI DASHBOARD displays data from PRIMARY TABLES:
   10. salesforce_sync_log — UC5 Salesforce CRM sync status log (sync_id, Prescriber_NPI, HCP_Name, sf_object_type, sf_record_id, sync_status, sync_message)
   11. rep_details — Sales representative directory (rep_id, rep_firstName, rep_lastName, email, phone, manager_id)
   12. rep_master — Manager directory (rep_id, rep_firstName, rep_lastName, email, phone)
+  13. Cohort_Alert_Details__c — UC6 Salesforce custom object storing cohort alert details, AI risk scores, and Next Best Action recommendations (Cohort_ID__c, HCP_Name__c, HCP_Email__c, Issue__c, Recommendation__c, AI_Confidence_Score__c, Product_Name__c, Month_Key__c)
 
 RULES:
 - ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
@@ -88,10 +93,11 @@ RULES:
 - For ALL claims and rejection queries, use `Leakage_Activity`.
 - For ALL medicine, tablet, drug extraction queries (UC4), use `Tablet_Extract_History` or `medicine_extraction_log` (joined with `hcp_master_details` on `Prescriber_NPI` to get HCP name: `CONCAT(hmd.hcp_firstName, ' ', hmd.hcp_lastName) AS HCP_Name`).
 - For Salesforce CRM sync/push queries (UC5), use `salesforce_sync_log` or `hcp_master_details` (sf_id, status, updated_at).
+- For Salesforce custom object queries (UC3 & UC6), query `Doctor__c`, `Rep_Details__c`, or `Cohort_Alert_Details__c`.
 - Use standard MySQL SQL syntax.
 - When user explicitly asks for 'today\'s' records or data for today, filter using `CURDATE()` on the date column: e.g. `WHERE DATE(Processed_TimeStamp) = CURDATE()`.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
-- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, data structure, flowchart, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of custom objects (Doctor__c, Rep_Details__c) and relationship fields. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
+- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, data structure, flowchart, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of custom objects (Doctor__c, Rep_Details__c, Cohort_Alert_Details__c) and relationship fields. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
 """
 
 
@@ -141,6 +147,35 @@ RULES:
 - Use standard MySQL SQL syntax.
 - When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
 - DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, pipeline flow, data structure, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of pipeline stages, lookup tables, and join keys. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
+"""
+
+
+# DB 3 (DataSure) system prompt for metadata catalog, ETL jobs, source systems, and tie-out reconciliation.
+DATASURE_SYSTEM_PROMPT = """
+You generate Python code to fetch and analyze data from the DataSure MySQL database (`data_sure`), using the Semantic YAML governance rules.
+
+The database supports DataSure governance, ETL pipeline metadata, source system catalog, and tie-out data reconciliation:
+  1. METADATA CATALOG       — datasure_metadata (schema metadata across systems: system_name, table_name, column_name, data_type, is_primary_key)
+  2. SOURCE SYSTEMS         — source_systems (master catalog of registered source systems, connection_type, connection_string, schema_name, system_desc, system_type, business_function)
+  3. ETL PIPELINE           — etl_jobs (ETL job definitions: etl_id, etl_name, source, target, src_table, tgt_table, src_file, existing_or_new)
+                            — etl_column_mappings (column-level mapping rules linking src_column to tgt_column per etl_id)
+  4. TIE-OUT RECONCILIATION — tie_out_config_master (master tie-out reconciliation config rules)
+                            — tieout_config (active tie-out configuration: source/target tables, columns, aggregate functions, joins, date columns, mapping JSON)
+                            — tieout_execution_log (reconciliation execution runs, status, duration, records, discrepancies count, results JSON)
+                            — tieout_schedule (automated tie-out run schedules, frequency, start/end dates, email recipients, alert flags)
+                            — tieout_mismatchdata (record-level mismatch details identified during tie-out runs)
+                            — tieout_missingdata (record-level missing data details identified during tie-out runs)
+                            — tieout_audit_log (audit log recording user actions, status changes, screens, resource types)
+
+RULES:
+- ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
+- NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- For ETL job queries, use `etl_jobs` and `etl_column_mappings` (joined on `etl_id`).
+- For DataSure metadata/schema lookup queries, use `datasure_metadata` or `source_systems`.
+- For tie-out reconciliation configs, logs, schedules, mismatches, or missing records, use `tieout_config`, `tie_out_config_master`, `tieout_execution_log`, `tieout_schedule`, `tieout_mismatchdata`, `tieout_missingdata`, or `tieout_audit_log`.
+- Use standard MySQL SQL syntax.
+- When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
+- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, pipeline flow, data structure, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of table relationships and join keys. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
 """
 
 
@@ -334,20 +369,26 @@ class LLMService:
             "  5. For search, you MUST set: result = {'sosl': '<search_query>', 'records': <flat_records_list_retrieved>}\n"
             "  6. Global scope already has 'sf', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
             "  7. Standard imports for allowed modules are permitted.\n"
-            "  8. Preferred objects are Doctor__c and Rep_Details__c. DO NOT query or include Manager fields (`Rep_Manager__r`, `Rep_Manager__c`) in any Salesforce queries because manager data is unpopulated.\n"
+            "  8. Preferred objects are Doctor__c, Rep_Details__c, and Cohort_Alert_Details__c. DO NOT query or include Manager fields (`Rep_Manager__r`, `Rep_Manager__c`) in any Salesforce queries because manager data is unpopulated.\n"
             "  9. ALWAYS include Doctor Phone (`Phone__c`), State License (`State_License__c`), and Representative details (`Rep_Ids__r.First_Name__c`, `Rep_Ids__r.Last_Name__c`, `Rep_Ids__r.Email__c`, `Rep_Ids__r.Phone_Number__c`) in the SELECT clause when querying Doctor__c records so contact details and email addresses are always returned.\n"
             "  10. FLEXIBLE SEARCHING: Use LIKE operators (e.g. Speciality__c LIKE '%cardiology%', HCP_First_Name__c LIKE '%John%', Practice_State__c LIKE '%TX%') for string searches to match partial or case-insensitive user inputs.\n"
             "  11. PICKLIST & STATE MAP:\n"
             "      - For Doctor__c.Status__c: Map 'in progress', 'progress', 'wip', 'ongoing' -> Status__c = 'In-Progress'. Map 'completed', 'complete', 'done', 'finished' -> Status__c = 'Completed'.\n"
             "      - For Practice_State__c & State_License__c: Support full state names and postal codes (e.g. State_License__c LIKE '%California%' OR State_License__c LIKE '%CA%' OR Practice_State__c LIKE '%CA%').\n"
-            "  12. GREETINGS & SCHEMA QUESTIONS:\n"
-            "      - If the user prompt is a greeting (e.g. 'hello', 'hi', 'hey', 'help'), set code = null and provide a helpful, welcoming natural language answer in the 'answer' field explaining available data (Doctors, Sales Reps) with example prompts.\n"
-            "      - If the user asks about available tables or schema ('what objects are in Salesforce?', 'describe Doctor__c object'), provide the schema info in 'answer' or run sf.describe_object('Doctor__c') / sf.list_objects().\n"
-            "  13. DIAGRAM & ER MODEL REQUESTS:\n"
-            "      - When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'architecture diagram', 'flowchart'), generate a valid Mermaid diagram block (```mermaid\nerDiagram\n...\n``` or ```mermaid\nflowchart TD\n...\n```) in the 'answer' field explaining Doctor__c and Rep_Details__c relationships. Set code = null unless live data is requested. DO NOT return dummy records in a table.\n\n"
-            "Example of querying Doctors with Rep Email & Contact Info:\n"
+            "  12. COHORT ALERTS & UC6 RECOMMENDATIONS (Cohort_Alert_Details__c):\n"
+            "      - When user asks for cohort alert details, AI risk scores, Next Best Action (NBA) recommendations, or HCP cohort alerts in Salesforce, query `Cohort_Alert_Details__c`.\n"
+            "      - Key Fields: Cohort_ID__c, Name, HCP_Name__c, HCP_ID__c, HCP_Email__c, Issue__c, Recommendation__c, AI_Confidence_Score__c, Product_Name__c, Month_Key__c.\n"
+            "  13. GREETINGS & SCHEMA QUESTIONS:\n"
+            "      - If the user prompt is a greeting (e.g. 'hello', 'hi', 'hey', 'help'), set code = null and provide a helpful, welcoming natural language answer in the 'answer' field explaining available data (Doctors, Sales Reps, Cohort Alert Details) with example prompts.\n"
+            "      - If the user asks about available tables or schema ('what objects are in Salesforce?', 'describe Cohort_Alert_Details__c object'), provide the schema info in 'answer' or run sf.describe_object('Cohort_Alert_Details__c') / sf.list_objects().\n"
+            "  14. DIAGRAM & ER MODEL REQUESTS:\n"
+            "      - When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'architecture diagram', 'flowchart'), generate a valid Mermaid diagram block (```mermaid\nerDiagram\n...\n``` or ```mermaid\nflowchart TD\n...\n```) in the 'answer' field explaining Doctor__c, Rep_Details__c, and Cohort_Alert_Details__c relationships. Set code = null unless live data is requested. DO NOT return dummy records in a table.\n\n"
+            "Example 1 - Querying Doctors with Rep Email & Contact Info:\n"
             "data = json.loads(sf.execute_soql(\"SELECT HCP_First_Name__c, HCP_Last_Name__c, Phone__c, State_License__c, Speciality__c, Practice_State__c, Status__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c WHERE Status__c = 'In-Progress'\"))\n"
             "result = {\"soql\": \"SELECT HCP_First_Name__c, HCP_Last_Name__c, Phone__c, State_License__c, Speciality__c, Practice_State__c, Status__c, Rep_Ids__r.First_Name__c, Rep_Ids__r.Last_Name__c, Rep_Ids__r.Email__c, Rep_Ids__r.Phone_Number__c FROM Doctor__c WHERE Status__c = 'In-Progress'\", \"records\": data.get(\"records\", [])}\n\n"
+            "Example 2 - Querying Cohort Alert Details & NBA Recommendations (UC6):\n"
+            "data = json.loads(sf.execute_soql(\"SELECT Cohort_ID__c, HCP_Name__c, HCP_Email__c, Issue__c, Recommendation__c, AI_Confidence_Score__c, Product_Name__c FROM Cohort_Alert_Details__c ORDER BY AI_Confidence_Score__c DESC\"))\n"
+            "result = {\"soql\": \"SELECT Cohort_ID__c, HCP_Name__c, HCP_Email__c, Issue__c, Recommendation__c, AI_Confidence_Score__c, Product_Name__c FROM Cohort_Alert_Details__c ORDER BY AI_Confidence_Score__c DESC\", \"records\": data.get(\"records\", [])}\n\n"
             "Format your output ONLY as a valid JSON object with these keys:\n"
             "{\n"
             "  \"reasoning\": \"your reasoning/steps\",\n"
@@ -404,6 +445,43 @@ class LLMService:
             "sql = \"SELECT BATCH_NUM, STATUS, HIN_STATUS, DEA_STATUS, USPS_STATUS FROM GPO_VALIDATION_JOBS "
             "WHERE LOWER(HIN_STATUS) = 'failed' OR LOWER(STATUS) = 'failed' ORDER BY BATCH_NUM DESC\"\n"
             "data = json.loads(gpo.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Format your output ONLY as a JSON object with these keys:\n"
+            "{\n"
+            "  \"reasoning\": \"your reasoning/steps\",\n"
+            "  \"code\": \"python code string to run or null\",\n"
+            "  \"answer\": \"natural language answer if no database query is required\"\n"
+            "}\n"
+            "Output ONLY the JSON object. Do not wrap in markdown tags like ```json."
+        )
+
+    def _get_datasure_refinement_instructions(self) -> str:
+        return (
+            "You write Python code to fetch or analyze data from the DataSure MySQL database via the "
+            "whitelisted 'datasure' global object.\n"
+            "The available 'datasure' methods are:\n"
+            "  - datasure.execute_sql(sql_query: str) -> str: Runs read-only SQL SELECT. Returns a JSON string "
+            "with 'records' and 'totalSize'. Must parse with json.loads().\n"
+            "  - datasure.describe_table(table_name: str) -> str: Returns column details for one table.\n"
+            "  - datasure.list_tables() -> str: Returns the list of tables in the database.\n"
+            "  - datasure.search_records(search_term: str) -> str: Runs cross-table text search. Returns JSON. Must parse with json.loads().\n\n"
+            "IMPORTANT: the global is named 'datasure', NOT 'db' or 'gpo' or 'sf'. There is no 'db' object in this scope.\n\n"
+            "Rules for writing code:\n"
+            "  1. You MUST execute queries using datasure.execute_sql() or datasure.search_records(). DO NOT hardcode empty lists or mock data.\n"
+            "  2. Parse the returned JSON string using json.loads() to access records.\n"
+            "  3. Store final output in variable 'result' = {'sql': '<query_string>', 'records': <records_list>}.\n"
+            "  4. Global scope has 'datasure', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
+            "  5. Write valid multi-line Python code with proper line breaks.\n"
+            "  6. TABLE WHITELIST: datasure_metadata, source_systems, etl_jobs, etl_column_mappings, tie_out_config_master, tieout_config, tieout_audit_log, tieout_execution_log, tieout_mismatchdata, tieout_missingdata, tieout_schedule.\n"
+            "  7. GREETINGS & SCHEMA QUESTIONS: if the prompt is a greeting or asks what data is available in DataSure, set code = null and describe the DataSure catalog, ETL pipeline, and tie-out domains in 'answer' with example prompts.\n"
+            "  8. DIAGRAM & ER MODEL REQUESTS: When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'pipeline flow', 'architecture diagram'), generate a valid Mermaid diagram block (```mermaid\\nerDiagram\\n...\\n``` or ```mermaid\\nflowchart TD\\n...\\n```) in the 'answer' field illustrating the DataSure tables and join keys. Set code = null unless live data is requested.\n\n"
+            "Example 1 - Querying ETL Jobs and Column Mappings:\n"
+            "sql = \"SELECT j.etl_id, j.etl_name, j.source, j.target, m.src_column, m.tgt_column FROM etl_jobs j JOIN etl_column_mappings m ON j.etl_id = m.etl_id ORDER BY j.etl_id DESC\"\n"
+            "data = json.loads(datasure.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 2 - Querying Tie-out Reconciliation Execution Logs:\n"
+            "sql = \"SELECT configuration_id, configuration_name, status, start_date, duration, discrepancies, results FROM tieout_execution_log ORDER BY start_date DESC\"\n"
+            "data = json.loads(datasure.execute_sql(sql))\n"
             "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
             "Format your output ONLY as a JSON object with these keys:\n"
             "{\n"
@@ -477,17 +555,30 @@ class LLMService:
                 f"User Question: {user_message}"
             )
 
+        if ctx.id == "mysql_datasure":
+            return (
+                f"{DATASURE_SYSTEM_PROMPT}\n\n"
+                f"{self._get_datasure_refinement_instructions()}\n\n"
+                f"{ctx.semantic_context(user_message)}\n\n"
+                f"{self._row_counts_block(ctx)}"
+                f"{history_context}"
+                f"CRITICAL REMINDER: You are operating on the DataSure database "
+                f"('{ctx.adapter.database}'). Use the 'datasure' global object. Do NOT reference 'db', 'gpo', or "
+                f"'sf', and do NOT mention Salesforce, SOQL, or any commercial/pharma tables such as "
+                f"Leakage_Activity or fatigue_score — they do not exist here.\n\n"
+                f"User Question: {user_message}"
+            )
+
         # mysql_primary (and any future MySQL source using the DB 1 convention)
         return (
             f"{SYSTEM_PROMPT}\n\n"
-            f"{self._get_refinement_instructions()}\n\n"
+            f"{self._get_refinement_instructions(ctx.sandbox_global)}\n\n"
             f"{ctx.semantic_context(user_message)}\n\n"
             f"{self._row_counts_block(ctx)}"
             f"{history_context}"
-            f"CRITICAL REMINDER: You are currently operating in the MySQL database environment. "
-            f"You MUST generate Python code using `db.execute_sql()` to retrieve data from MySQL "
-            f"tables like `Tablet_Extract_History` or `medicine_extraction_log`. Do NOT mention "
-            f"Salesforce or SOQL.\n\n"
+            f"CRITICAL REMINDER: You are currently operating in the {ctx.label} MySQL database environment. "
+            f"You MUST generate Python code using `{ctx.sandbox_global}.execute_sql()` to retrieve data from MySQL "
+            f"tables. Do NOT mention Salesforce or SOQL.\n\n"
             f"User Question: {user_message}"
         )
 
@@ -796,7 +887,8 @@ class LLMService:
         result["needs_clarification"] = False
         return result
 
-    def _get_refinement_instructions(self) -> str:
+    def _get_refinement_instructions(self, global_name: str = "db") -> str:
+        g = global_name
         return (
             "STRICT TABLE & COLUMN SELECTION MANDATE:\n"
             "You MUST strictly follow the BUSINESS TO DATABASE MAPPING RULES listed above.\n\n"
@@ -810,14 +902,26 @@ class LLMService:
             "  7. `campaign_master` (100 rows): campaign_id, campaign_name, campaign_type, campaign_category, channel ('Email','Webinar',etc.), product_id, brand_name, target_audience, target_specialty, target_segment, budget_amount, expected_reach, status.\n"
             "  8. `hcp_master` (103 rows): id, Prescriber_NPI, hcp_firstName, hcp_lastName, specialty, practice_state, practice_zip, phone, secure_fax. (Full HCP Name = CONCAT(hcp_firstName, ' ', hcp_lastName))\n"
             "  9. `Reject_Code_Master` (200 rows): reject_code, reject_description, severity.\n"
-            "  10. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n\n"
+            "  10. `Payer_Master` (200 rows): payer_id, payer_name, payer_type ('Commercial','Medicare','Medicaid'), region.\n"
+            "  11. `UC6 Tables` (Next Best Action & Cohort Intelligence):\n"
+            "      - `dim_product`: Product_ID, Product_Name, Brand, Therapeutic_Area.\n"
+            "      - `dim_time`: Month_Key, Year, Month, Month_Start_Date, Quarter.\n"
+            "      - `fact_hcp_cohort`: Cohort_ID, Created_Date, id (FK -> hcp_master.id), Product_ID (FK -> dim_product.Product_ID), Month_Key (FK -> dim_time.Month_Key).\n"
+            "      - `fact_market_performance`: Market_ID, TRx, NRx, Market_Share, Performance_Date, Cohort_ID (FK -> fact_hcp_cohort.Cohort_ID).\n"
+            "      - `fact_rep_activity`: Activity_ID, Call_Count, Visit_Count, Sample_Count, Event_Date, Cohort_ID, CLM_Count, Speaker_Program_Count.\n"
+            "      - `fact_patient_journey`: Journey_ID, Diagnosis_Date, Therapy_Start_Date, Persistence_Days, Cohort_ID, Patient_ID, Therapy_Stop_Date, Adherence_Score.\n"
+            "      - `fact_digital_engagement`: Engagement_ID, Email_Sent, Email_Open, Click_Count, Webinar_Attended, Engagement_Date, Cohort_ID.\n"
+            "      - `fact_ai_risk`: Risk_ID, Risk_Score, Leakage_Risk_Score, Fatigue_Score, Risk_Level, Risk_Date, Cohort_ID.\n"
+            "      - `fact_milestone`: Milestone_ID, Trigger_Type, Trigger_Date, Milestone_Status, Risk_ID (FK -> fact_ai_risk.Risk_ID).\n"
+            "      - `fact_nba`: NBA_ID, Recommendation, Priority, Confidence_Score, Suggested_Date, Milestone_ID (FK -> fact_milestone.Milestone_ID), Cohort_Status.\n\n"
             "CRITICAL RULES:\n"
-            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims, Tablet_Extract_History, Transcript_Extraction_History, hcp_master_details, hcp_master_workdetails_history, rep_details, rep_master.\n"
+            "  - TABLE WHITELIST: Leakage_Activity, copay_Claims_Transactions, leakage_history, Compliance_Table, hcp_engagement_logs, fatigue_score, Product_Master, hcp_master, Zip_Geography_Master, Payer_Master, campaign_master, Reject_Code_Master, territory_master, Reverse_Claims, Tablet_Extract_History, Transcript_Extraction_History, hcp_master_details, hcp_master_workdetails_history, rep_details, rep_master, dim_product, dim_time, fact_hcp_cohort, fact_market_performance, fact_rep_activity, fact_patient_journey, fact_digital_engagement, fact_ai_risk, fact_milestone, fact_nba.\n"
             "  - For ALL medicine, drug, and tablet extraction prompts (UC4), query `Tablet_Extract_History` or `Transcript_Extraction_History` (JOIN `hcp_master_details` ON `Prescriber_NPI` if physician name is requested).\n"
             "  - For ALL Salesforce sync audit, status, and CRM push prompts (UC5), query `hcp_master_details` (sf_id, status, updated_at) or `Tablet_Extract_History` (sf_id, status, message).\n"
+            "  - For ALL Next Best Action (NBA), AI risk score, cohort performance, patient journey, and milestone prompts (UC6), query `fact_nba`, `fact_ai_risk`, `fact_hcp_cohort`, `fact_market_performance`, `fact_patient_journey`, `fact_rep_activity`, `fact_digital_engagement`, `fact_milestone`, `dim_product`, or `dim_time`.\n"
             "  - DO NOT USE copay_Claims_Transactions or Reverse_Claims for any claim or rejection queries. ALWAYS use Leakage_Activity (Pharmacy_Rejections, Total_Brand_Rejections) for all claims and rejection prompts.\n"
             "  - NEVER invent column names.\n"
-            "  - For cross-table keyword search (e.g. 'Search for Endocrinology in the database', 'Look up Nancy everywhere', 'Find any record containing TX across all tables'), call Python code: `data = json.loads(db.search_records('search_term'))` and store `result = {'sql': 'CROSS_TABLE_SEARCH: search_term', 'records': data.get('records', [])}`.\n"
+            f"  - For cross-table keyword search, call Python code: `data = json.loads({g}.search_records('search_term'))` and store `result = {{'sql': 'CROSS_TABLE_SEARCH: search_term', 'records': data.get('records', [])}}`.\n"
             "  - When user asks for 'today\'s' records or data for today, ALWAYS filter strictly using `CURDATE()` on the relevant date column: `WHERE DATE(Processed_TimeStamp) = CURDATE()`.\n\n"
             "VERIFIED JOIN PATHS:\n"
             "  - copay_Claims_Transactions.Prescriber_NPI = hcp_master.Prescriber_NPI\n"
@@ -826,31 +930,42 @@ class LLMService:
             "  - hcp_engagement_logs.Campaign_ID = campaign_master.campaign_id\n"
             "  - hcp_engagement_logs.HCP_ID = hcp_master.Prescriber_NPI\n"
             "  - Compliance_Table.Payer_id = Payer_Master.payer_id\n"
-            "  - Leakage_Activity.productid = Product_Master.product_id\n\n"
-            "You write Python code to fetch or analyze data from a MySQL database via the whitelisted 'db' global object.\n"
-            "The available 'db' methods are:\n"
-            "  - db.execute_sql(sql_query: str) -> str: Runs read-only SQL SELECT. Returns a JSON string with 'records' and 'totalSize'. Must parse with json.loads().\n"
-            "  - db.describe_table(table_name: str) -> str: Returns schema details for a specific table.\n"
-            "  - db.list_tables() -> str: Returns list of tables in the database.\n"
-            "  - db.search_records(search_term: str) -> str: Runs cross-table text search. Returns JSON. Must parse with json.loads().\n\n"
+            "  - Leakage_Activity.productid = Product_Master.product_id\n"
+            "  - fact_hcp_cohort.id = hcp_master.id\n"
+            "  - fact_hcp_cohort.Product_ID = dim_product.Product_ID\n"
+            "  - fact_hcp_cohort.Month_Key = dim_time.Month_Key\n"
+            "  - fact_market_performance.Cohort_ID = fact_hcp_cohort.Cohort_ID\n"
+            "  - fact_rep_activity.Cohort_ID = fact_hcp_cohort.Cohort_ID\n"
+            "  - fact_patient_journey.Cohort_ID = fact_hcp_cohort.Cohort_ID\n"
+            "  - fact_digital_engagement.Cohort_ID = fact_hcp_cohort.Cohort_ID\n"
+            "  - fact_ai_risk.Cohort_ID = fact_hcp_cohort.Cohort_ID\n"
+            "  - fact_milestone.Risk_ID = fact_ai_risk.Risk_ID\n"
+            "  - fact_nba.Milestone_ID = fact_milestone.Milestone_ID\n\n"
+            f"You write Python code to fetch or analyze data from a MySQL database via the whitelisted '{g}' global object.\n"
+            f"The available '{g}' methods are:\n"
+            f"  - {g}.execute_sql(sql_query: str) -> str: Runs read-only SQL SELECT. Returns a JSON string with 'records' and 'totalSize'. Must parse with json.loads().\n"
+            f"  - {g}.describe_table(table_name: str) -> str: Returns schema details for a specific table.\n"
+            f"  - {g}.list_tables() -> str: Returns list of tables in the database.\n"
+            f"  - {g}.search_records(search_term: str) -> str: Runs cross-table text search. Returns JSON. Must parse with json.loads().\n\n"
+            f"IMPORTANT: the global object is named '{g}'. You MUST execute queries using {g}.execute_sql(). DO NOT use any other global variable name.\n\n"
             "Rules for writing code:\n"
-            "  1. You MUST execute queries using db.execute_sql() or db.search_records(). DO NOT hardcode empty lists or mock data.\n"
+            f"  1. You MUST execute queries using {g}.execute_sql() or {g}.search_records(). DO NOT hardcode empty lists or mock data.\n"
             "  2. Parse the returned JSON string using json.loads() to access records.\n"
             "  3. Store final output in variable 'result' = {'sql': '<query_string>', 'records': <records_list>}.\n"
-            "  4. Global scope has 'db', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
+            f"  4. Global scope has '{g}', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
             "  5. Write valid multi-line Python code with proper line breaks.\n"
             "  6. When a PRE-DEFINED SQL MEASURE matches the user's question, adapt it as your template.\n"
             "  7. DIAGRAM & ER MODEL REQUESTS: When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'architecture diagram', 'flowchart', 'process flow'), generate a valid Mermaid diagram block (```mermaid\\nerDiagram\\n...\\n``` or ```mermaid\\nflowchart TD\\n...\\n```) in your 'answer' field with clear entity and join relationships. Set code = null unless live database queries are specifically needed. DO NOT return dummy SQL records in a table.\n\n"
-            "Example 1 - UC3 Work details (uses hcp_master_details):\n"
+            "Example 1 - UC3 Work details:\n"
             "sql = \"SELECT hcp_firstName, hcp_lastName, Prescriber_NPI, rep_id, status, work_detail, updated_at FROM hcp_master_details ORDER BY updated_at DESC\"\n"
-            "data = json.loads(db.execute_sql(sql))\n"
+            f"data = json.loads({g}.execute_sql(sql))\n"
             "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
-            "Example 2 - UC3 Audit History (uses hcp_master_workdetails_history):\n"
+            "Example 2 - UC3 Audit History:\n"
             "sql = \"SELECT history_id, hcp_id, rep_id, rep_firstName, rep_lastName, work_detail, updated_datetime FROM hcp_master_workdetails_history ORDER BY updated_datetime DESC\"\n"
-            "data = json.loads(db.execute_sql(sql))\n"
+            f"data = json.loads({g}.execute_sql(sql))\n"
             "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
             "Example 3 - Cross-table text search:\n"
-            "data = json.loads(db.search_records('Nancy'))\n"
+            f"data = json.loads({g}.search_records('Nancy'))\n"
             "result = {\"sql\": \"CROSS_TABLE_SEARCH: Nancy\", \"records\": data.get(\"records\", [])}\n\n"
             "Format your output ONLY as a JSON object with these keys:\n"
             "{\n"

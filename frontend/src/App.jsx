@@ -4,14 +4,9 @@ import SourceSelector from './components/SourceSelector';
 import LoginPage from './components/LoginPage';
 import logoMain from './assets/SRM_logo.png';
 import logoSmall from './assets/SRM_logo_small.png';
+import { getApiEndpoint } from './utils/apiEndpoint';
 import './App.css';
 
-// Backend API endpoint — set via VITE_API_URL at build time or cached from a prior session.
-const getApiEndpoint = () => {
-  const envUrl = import.meta.env.VITE_API_URL;
-  const savedUrl = localStorage.getItem('__mysql_chat_api_endpoint__') || localStorage.getItem('__sf_chat_api_endpoint__');
-  return savedUrl || envUrl || 'http://localhost:8008';
-};
 
 // How often to silently re-check backend/connection/LLM health in the background.
 const STATUS_POLL_MS = 15000;

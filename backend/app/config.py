@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     GPO_MYSQL_PASSWORD: str = ""
     GPO_MYSQL_DATABASE: str = ""
 
+    # MySQL Connection Settings — DB 3 (DataSure Database)
+    DataSure_MYSQL_HOST: str = ""
+    DataSure_MYSQL_PORT: int = 3306
+    DataSure_MYSQL_USER: str = ""
+    DataSure_MYSQL_PASSWORD: str = ""
+    DataSure_MYSQL_DATABASE: str = "data_sure"
+
     # LLM Settings
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: str = "openai/gpt-oss-120b"
@@ -49,6 +56,7 @@ class Settings(BaseSettings):
     @field_validator(
         "MYSQL_HOST", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE",
         "GPO_MYSQL_HOST", "GPO_MYSQL_USER", "GPO_MYSQL_PASSWORD", "GPO_MYSQL_DATABASE",
+        "DataSure_MYSQL_HOST", "DataSure_MYSQL_USER", "DataSure_MYSQL_PASSWORD", "DataSure_MYSQL_DATABASE",
         "GROQ_API_KEY", "GROQ_MODEL", "CLAUDE_API_KEY", "CLAUDE_MODEL", "HOST",
         "SF_USERNAME", "SF_PASSWORD", "SF_SECURITY_TOKEN", "SF_DOMAIN", "SF_SESSION_ID", "SF_INSTANCE_URL",
         "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "BEDROCK_CLAUDE_MODEL",

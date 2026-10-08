@@ -1,0 +1,620 @@
+version: 2
+semantic_model:
+  name: data_sure
+  description: >
+    Semantic model for the DataSure database (`data_sure`).
+    Contains ETL job definitions, column mappings, system metadata catalog, registered source systems, tie-out reconciliation configurations, schedules, execution logs, record mismatches, missing data details, and audit logs.
+
+  domains:
+    - name: etl_pipeline
+      purpose: >
+        ETL job definitions and target-to-source column mappings.
+      tables: [etl_jobs, etl_column_mappings]
+      keywords: ["etl", "etl job", "column mapping", "src_table", "tgt_table", "src_column", "tgt_column"]
+
+    - name: metadata_catalog
+      purpose: >
+        Metadata repository storing system definitions, connection strings, table, column names, data types, and primary key indicators.
+      tables: [datasure_metadata, source_systems]
+      keywords: ["metadata", "datasure metadata", "system_name", "table_name", "column_name", "data_type", "is_primary_key", "source_systems", "connection_string", "connection_type"]
+
+    - name: tie_out_reconciliation
+      purpose: >
+        Data tie-out reconciliation configurations, source & target query rules, aggregate functions, join conditions, mapping JSON, execution logs, schedules, mismatch & missing record details, and audit logs.
+      tables: [tie_out_config_master, tieout_config, tieout_audit_log, tieout_execution_log, tieout_mismatchdata, tieout_missingdata, tieout_schedule]
+      keywords: ["tie_out", "tieout", "tie out", "reconciliation", "tieout_config", "tieout_execution_log", "tieout_schedule", "mismatchdata", "missingdata", "audit_log"]
+
+  # ============================================================
+  # BUSINESS TO DATABASE MAPPING RULES
+  # ============================================================
+  mapping_rules:
+    - category: "ETL Column Mapping Rules"
+      rule: "For column-level ETL mappings, join `etl_column_mappings` to `etl_jobs` on `etl_id` (`etl_column_mappings.etl_id = etl_jobs.etl_id`). Use `src_column` and `tgt_column` for column lineage."
+    - category: "Metadata Catalog Rules"
+      rule: "For system and database schema lookups, query `datasure_metadata` (system_name, table_name, column_name, data_type, is_primary_key) or `source_systems` (system_name, connection_type, connection_string, schema_name, system_type, business_function)."
+    - category: "Tie-Out Reconciliation Rules"
+      rule: "For active reconciliation configurations, join `tieout_execution_log` or `tieout_schedule` to `tieout_config` on `configuration_id` (`tieout_execution_log.configuration_id = tieout_config.id` or `tieout_schedule.configuration_id = tieout_config.id`)."
+    - category: "Tie-Out Discrepancy & Mismatch Rules"
+      rule: "To find discrepancy runs, query `tieout_execution_log` where `discrepancies > 0`. For record-level mismatch/missing details, join `tieout_mismatchdata` or `tieout_missingdata` to `tieout_config` on `configuration_name`."
+    - category: "Read-Only Mandate"
+      rule: "Generate only read-only SELECT queries. Do not perform INSERT, UPDATE, DELETE, or DDL operations on DataSure metadata."
+
+  # ============================================================
+  # EXPLICIT JOIN PATHS
+  # ============================================================
+  joins:
+    - name: etl_to_column_mappings
+      left_table: etl_column_mappings
+      right_table: etl_jobs
+      join_condition: "etl_column_mappings.etl_id = etl_jobs.etl_id"
+      description: "Links column-level target and source mapping rules to their parent ETL job definition."
+
+    - name: tieout_execution_to_config
+      left_table: tieout_execution_log
+      right_table: tieout_config
+      join_condition: "tieout_execution_log.configuration_id = tieout_config.id"
+      description: "Links reconciliation execution log runs to active tie-out configurations."
+
+    - name: tieout_schedule_to_config
+      left_table: tieout_schedule
+      right_table: tieout_config
+      join_condition: "tieout_schedule.configuration_id = tieout_config.id"
+      description: "Links automated reconciliation schedule entries to their parent tie-out configuration."
+
+    - name: tieout_mismatch_to_config
+      left_table: tieout_mismatchdata
+      right_table: tieout_config
+      join_condition: "tieout_mismatchdata.configuration_name = tieout_config.configuration_name"
+      description: "Links record-level mismatch details to tie-out configurations by configuration_name."
+
+    - name: tieout_missing_to_config
+      left_table: tieout_missingdata
+      right_table: tieout_config
+      join_condition: "tieout_missingdata.configuration_name = tieout_config.configuration_name"
+      description: "Links record-level missing data details to tie-out configurations by configuration_name."
+
+  # ============================================================
+  # PRE-DEFINED SQL MEASURES
+  # ============================================================
+  measures:
+    - name: etl_job_summary
+      description: "Summary of all registered ETL jobs with source/target tables and source files"
+      sql: "SELECT etl_id, etl_name, source, target, src_table, tgt_table, src_file, existing_or_new FROM etl_jobs ORDER BY etl_id DESC"
+
+    - name: etl_column_mapping_details
+      description: "Detailed column mappings for each ETL job"
+      sql: "SELECT j.etl_name, j.source, j.target, j.src_table, j.tgt_table, m.src_column, m.tgt_column FROM etl_jobs j JOIN etl_column_mappings m ON j.etl_id = m.etl_id ORDER BY j.etl_id, m.id"
+
+    - name: source_systems_catalog
+      description: "Catalog of all registered source systems, connection types, and business functions"
+      sql: "SELECT system_name, connection_type, connection_string, schema_name, system_type, business_function, created_date FROM source_systems ORDER BY created_date DESC"
+
+    - name: datasure_metadata_summary
+      description: "Metadata repository overview grouped by system and table name"
+      sql: "SELECT system_name, table_name, COUNT(column_name) as column_count, SUM(CASE WHEN is_primary_key IN ('Y','1') THEN 1 ELSE 0 END) as pk_count FROM datasure_metadata GROUP BY system_name, table_name ORDER BY system_name, table_name"
+
+    - name: tieout_configurations_overview
+      description: "Overview of active tie-out reconciliation configurations"
+      sql: "SELECT id, configuration_name, source_system, target_system, source_aggregate_func, source_aggregate_col, target_aggregate_func, target_aggregate_col, active, scheduled FROM tieout_config WHERE active = 1"
+
+    - name: tieout_execution_log_summary
+      description: "Latest tie-out execution logs with discrepancy counts and run statuses"
+      sql: "SELECT id, configuration_id, configuration_name, status, start_date, duration, discrepancies, results FROM tieout_execution_log ORDER BY start_date DESC"
+
+    - name: tieout_discrepancy_runs
+      description: "Tie-out reconciliation runs that identified discrepancies (> 0)"
+      sql: "SELECT configuration_name, status, start_date, duration, discrepancies, results FROM tieout_execution_log WHERE discrepancies > 0 ORDER BY start_date DESC"
+
+    - name: tieout_mismatches_summary
+      description: "Summary of record-level mismatches identified during tie-out reconciliation"
+      sql: "SELECT configuration_name, run_id, isIgnored, record_data, created_date FROM tieout_mismatchdata ORDER BY created_date DESC"
+
+    - name: tieout_missingdata_summary
+      description: "Summary of record-level missing data identified during tie-out reconciliation"
+      sql: "SELECT configuration_name, run_id, isIgnored, record_data, created_date FROM tieout_missingdata ORDER BY created_date DESC"
+
+    - name: tieout_active_schedules
+      description: "Automated tie-out reconciliation schedules and notification settings"
+      sql: "SELECT s.configuration_name, s.frequency, s.start_date, s.time, s.end_date, s.email_recipients, s.emailEnabled, s.status FROM tieout_schedule s ORDER BY s.created_date DESC"
+
+    - name: tieout_audit_trail
+      description: "Audit trail of user and system actions on tie-out reconciliation"
+      sql: "SELECT tieout_name, user_action, action_desc, status, created_by, created_date, screen, resource_type FROM tieout_audit_log ORDER BY created_date DESC"
+
+  sources:
+    - name: mysql_datasure
+      database: data_sure
+      tables:
+
+        # =====================================================
+        # TABLE 1: datasure_metadata
+        # =====================================================
+        - name: datasure_metadata
+          description: >
+            Stores schema metadata across systems including system name, table name, column name, data type, and primary key status.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment metadata record ID"
+            - name: system_name
+              type: string
+              description: "Name of the source/target system"
+            - name: table_name
+              type: string
+              description: "Database table name"
+            - name: column_name
+              type: string
+              description: "Column name within the table"
+            - name: data_type
+              type: string
+              description: "Data type of the column"
+            - name: is_primary_key
+              type: string
+              description: "Primary key flag ('Y'/'N' or '1'/'0')"
+
+        # =====================================================
+        # TABLE 2: etl_jobs
+        # =====================================================
+        - name: etl_jobs
+          description: >
+            Master definitions of ETL jobs including ETL name, source/target systems, source/target tables, source files, and status flags.
+          columns:
+            - name: etl_id
+              type: primary_key
+              description: "Unique auto-increment ETL job ID"
+            - name: etl_name
+              type: string
+              description: "Human-readable ETL job name"
+            - name: source
+              type: string
+              description: "Source system name"
+            - name: target
+              type: string
+              description: "Target system name"
+            - name: src_table
+              type: string
+              description: "Source table name"
+            - name: tgt_table
+              type: string
+              description: "Target table name"
+            - name: src_file
+              type: string
+              description: "Source file name or path if file-based ETL"
+            - name: existing_or_new
+              type: string
+              description: "Indicates whether target is an existing or new table ('existing'/'new')"
+
+        # =====================================================
+        # TABLE 3: etl_column_mappings
+        # =====================================================
+        - name: etl_column_mappings
+          description: >
+            Detail column-level mapping rules for ETL jobs, linking source columns to target columns for each ETL job.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment column mapping ID"
+            - name: etl_id
+              type: integer
+              references: etl_jobs.etl_id
+              description: "Foreign key linking to etl_jobs.etl_id"
+            - name: src_column
+              type: string
+              description: "Source column name"
+            - name: tgt_column
+              type: string
+              description: "Target column name"
+
+        # =====================================================
+        # TABLE 4: source_systems
+        # =====================================================
+        - name: source_systems
+          description: >
+            Master catalog of registered source systems, connection types, connection strings, schema names, and system functions.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment system ID"
+            - name: system_name
+              type: string
+              description: "System identifier name"
+            - name: connection_type
+              type: string
+              description: "Connection protocol/driver type (e.g. MySQL, Oracle, REST API)"
+            - name: connection_string
+              type: string
+              description: "Connection string or target URL"
+            - name: schema_name
+              type: string
+              description: "Target database schema name"
+            - name: created_date
+              type: datetime
+              description: "System registration date"
+            - name: created_by
+              type: string
+              description: "User who registered the system"
+            - name: system_desc
+              type: string
+              description: "System description"
+            - name: system_type
+              type: string
+              description: "System type category"
+            - name: business_function
+              type: string
+              description: "Business function supported by this system"
+
+        # =====================================================
+        # TABLE 5: tie_out_config_master
+        # =====================================================
+        - name: tie_out_config_master
+          description: >
+            Master configuration catalog for tie-out data reconciliation rules, defining source and target systems, tables, aggregate functions, join conditions, date columns, mapping JSON, and schedule status.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment configuration ID"
+            - name: configuration_name
+              type: string
+              description: "Unique tie-out configuration name"
+            - name: source_system
+              type: string
+              description: "Source system name"
+            - name: source_tables
+              type: string
+              description: "JSON array of source table names"
+            - name: source_columns
+              type: string
+              description: "JSON array of source column names"
+            - name: source_group_by
+              type: string
+              description: "JSON array of source group-by columns"
+            - name: source_aggregate_col
+              type: string
+              description: "Source column to aggregate"
+            - name: source_aggregate_func
+              type: string
+              description: "Aggregation function (e.g. SUM, COUNT, AVG)"
+            - name: source_joins
+              type: string
+              description: "JSON array of source join clauses"
+            - name: source_date_column
+              type: string
+              description: "Source date column for filtering"
+            - name: source_where_conditions
+              type: string
+              description: "JSON array of source WHERE clauses"
+            - name: source_query
+              type: string
+              description: "Raw or compiled source SQL query"
+            - name: target_system
+              type: string
+              description: "Target system name"
+            - name: target_tables
+              type: string
+              description: "JSON array of target table names"
+            - name: target_columns
+              type: string
+              description: "JSON array of target column names"
+            - name: target_group_by
+              type: string
+              description: "JSON array of target group-by columns"
+            - name: target_aggregate_col
+              type: string
+              description: "Target column to aggregate"
+            - name: target_aggregate_func
+              type: string
+              description: "Target aggregation function"
+            - name: target_joins
+              type: string
+              description: "JSON array of target join clauses"
+            - name: target_date_column
+              type: string
+              description: "Target date column for filtering"
+            - name: target_where_conditions
+              type: string
+              description: "JSON array of target WHERE clauses"
+            - name: target_query
+              type: string
+              description: "Raw or compiled target SQL query"
+            - name: mapping_json
+              type: string
+              description: "JSON mapping definition between source and target"
+            - name: description
+              type: string
+              description: "Tie-out configuration description"
+            - name: active
+              type: boolean
+              description: "Active flag (true/false)"
+            - name: created_date
+              type: datetime
+              description: "Creation timestamp"
+            - name: created_by
+              type: string
+              description: "User who created the configuration"
+            - name: modified_date
+              type: datetime
+              description: "Last modification timestamp"
+            - name: modified_by
+              type: string
+              description: "User who last modified the configuration"
+            - name: scheduled
+              type: boolean
+              description: "Scheduled execution flag"
+
+        # =====================================================
+        # TABLE 6: tieout_config
+        # =====================================================
+        - name: tieout_config
+          description: >
+            Primary tie-out reconciliation configuration table defining source and target systems, tables, columns, aggregate functions, join conditions, mapping JSON, schedule, and active status.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment configuration ID"
+            - name: configuration_name
+              type: string
+            - name: source_system
+              type: string
+            - name: source_tables
+              type: string
+            - name: source_columns
+              type: string
+            - name: source_group_by
+              type: string
+            - name: source_aggregate_col
+              type: string
+            - name: source_aggregate_func
+              type: string
+            - name: source_joins
+              type: string
+            - name: source_date_column
+              type: string
+            - name: source_where_conditions
+              type: string
+            - name: source_query
+              type: string
+            - name: target_system
+              type: string
+            - name: target_tables
+              type: string
+            - name: target_columns
+              type: string
+            - name: target_group_by
+              type: string
+            - name: target_aggregate_col
+              type: string
+            - name: target_aggregate_func
+              type: string
+            - name: target_joins
+              type: string
+            - name: target_date_column
+              type: string
+            - name: target_where_conditions
+              type: string
+            - name: target_query
+              type: string
+            - name: mapping_json
+              type: string
+            - name: created_date
+              type: datetime
+            - name: active
+              type: boolean
+            - name: created_by
+              type: string
+            - name: modified_date
+              type: datetime
+            - name: modified_by
+              type: string
+            - name: description
+              type: string
+            - name: scheduled
+              type: boolean
+
+        # =====================================================
+        # TABLE 7: tieout_audit_log
+        # =====================================================
+        - name: tieout_audit_log
+          description: >
+            Audit log recording user actions, status changes, screens, and resource types during tie-out reconciliation runs.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment log ID"
+            - name: tieout_name
+              type: string
+              description: "Name of the tie-out configuration"
+            - name: user_action
+              type: string
+              description: "Action performed by user/system"
+            - name: action_desc
+              type: string
+              description: "Detailed action description"
+            - name: status
+              type: string
+              description: "Tie-out execution status"
+            - name: created_date
+              type: datetime
+              description: "Log creation timestamp"
+            - name: created_by
+              type: string
+              description: "User who performed the action"
+            - name: modified_date
+              type: datetime
+              description: "Modification timestamp"
+            - name: modified_by
+              type: string
+              description: "User who modified the record"
+            - name: screen
+              type: string
+              description: "UI screen where action took place"
+            - name: resource_type
+              type: string
+              description: "Resource type identifier"
+
+        # =====================================================
+        # TABLE 8: tieout_execution_log
+        # =====================================================
+        - name: tieout_execution_log
+          description: >
+            Execution log tracking tie-out reconciliation runs, configuration ID, status, start date, duration, records processed, discrepancies count, and execution results.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment execution log ID"
+            - name: configuration_id
+              type: integer
+              references: tieout_config.id
+              description: "Foreign key linking to tieout_config.id"
+            - name: configuration_name
+              type: string
+            - name: status
+              type: string
+            - name: start_date
+              type: datetime
+            - name: duration
+              type: string
+            - name: records
+              type: string
+            - name: discrepancies
+              type: integer
+            - name: created_date
+              type: datetime
+            - name: created_by
+              type: string
+            - name: modified_date
+              type: datetime
+            - name: modified_by
+              type: string
+            - name: results
+              type: string
+
+        # =====================================================
+        # TABLE 9: tieout_mismatchdata
+        # =====================================================
+        - name: tieout_mismatchdata
+          description: >
+            Stores record-level mismatch details identified during tie-out reconciliation runs.
+          columns:
+            - name: id
+              type: primary_key
+            - name: created_date
+              type: datetime
+            - name: created_by
+              type: string
+            - name: modified_date
+              type: datetime
+            - name: modified_by
+              type: string
+            - name: configuration_name
+              type: string
+            - name: isIgnored
+              type: boolean
+            - name: record_data
+              type: string
+            - name: run_id
+              type: integer
+
+        # =====================================================
+        # TABLE 10: tieout_missingdata
+        # =====================================================
+        - name: tieout_missingdata
+          description: >
+            Stores record-level missing data details identified during tie-out reconciliation runs.
+          columns:
+            - name: id
+              type: primary_key
+            - name: created_date
+              type: datetime
+            - name: created_by
+              type: string
+            - name: modified_date
+              type: datetime
+            - name: modified_by
+              type: string
+            - name: configuration_name
+              type: string
+            - name: isIgnored
+              type: boolean
+            - name: record_data
+              type: string
+            - name: run_id
+              type: integer
+
+        # =====================================================
+        # TABLE 11: tieout_schedule
+        # =====================================================
+        - name: tieout_schedule
+          description: >
+            Schedules automated tie-out reconciliation runs, including frequency, start/end dates, execution time, notification email recipients, and alert flags.
+          columns:
+            - name: id
+              type: primary_key
+            - name: configuration_name
+              type: string
+            - name: description
+              type: string
+            - name: frequency
+              type: string
+            - name: start_date
+              type: date
+            - name: time
+              type: string
+            - name: end_date
+              type: date
+            - name: email_recipients
+              type: string
+            - name: created_date
+              type: datetime
+            - name: created_by
+              type: string
+            - name: modified_date
+              type: datetime
+            - name: modified_by
+              type: string
+            - name: configuration_id
+              type: integer
+              references: tieout_config.id
+            - name: emailEnabled
+              type: boolean
+            - name: onSuccess
+              type: boolean
+            - name: onFailure
+              type: boolean
+            - name: onDiscrepancies
+              type: boolean
+            - name: status
+              type: string
+
+  # ============================================================
+  # FOREIGN KEY RELATIONSHIPS
+  # ============================================================
+  relationships:
+    - name: etl_job_column_mappings
+      from: etl_column_mappings.etl_id
+      to: etl_jobs.etl_id
+      type: many_to_one
+      description: "Links column mapping records to their parent ETL job definition."
+
+    - name: tieout_config_execution_logs
+      from: tieout_execution_log.configuration_id
+      to: tieout_config.id
+      type: many_to_one
+      description: "Links execution log entries to their parent tie-out configuration."
+
+    - name: tieout_config_schedules
+      from: tieout_schedule.configuration_id
+      to: tieout_config.id
+      type: many_to_one
+      description: "Links schedule definitions to their parent tie-out configuration."
+
+    - name: tieout_config_mismatches
+      from: tieout_mismatchdata.configuration_name
+      to: tieout_config.configuration_name
+      type: many_to_one
+      description: "Links record-level mismatch details to tie-out configurations."
+
+    - name: tieout_config_missingdata
+      from: tieout_missingdata.configuration_name
+      to: tieout_config.configuration_name
+      type: many_to_one
+      description: "Links record-level missing data details to tie-out configurations."
