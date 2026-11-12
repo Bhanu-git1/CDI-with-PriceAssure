@@ -1,0 +1,1858 @@
+version: 2
+semantic_model:
+  name: price_assure
+  description: >
+    Semantic model for the PriceAssure database (`gp`).
+    Provides government pricing (GP), non-Medicaid calculations, direct sales transactions (source & target),
+    ineligible sales & chargebacks (source & target), rebate sales (source, eligible target, and ineligible target),
+    Average Manufacturer Price (AMP) calculations and baseline sources (`gp_nm_direct_sale_gp_calc`, `gp_nm_direct_sale_gp_calc_src`),
+    calculation variance and reconciliation comparisons (`gp_comparison_results`), file processing audit logs (`gp_logs`),
+    policy filtering governance, WAC, Prompt Pay (PP) discounts, wholesaler distributions,
+    and FSS/PHS statutory pricing eligibility governance.
+
+  domains:
+    - name: gp_configuration
+      purpose: >
+        Government pricing non-Medicaid component configuration, calculation codes,
+        smoothing flags, proration requirements, policy filter rules, and file ingestion audit logs.
+      tables: [gp_nm_config, gp_nm_policy_filter, gp_logs]
+      keywords: ["gp_nm_config", "gp_nm_policy_filter", "gp_logs", "config", "component", "code", "smoothing", "proration", "required_flag", "component_type", "policy", "policy_filter", "rule_name", "price_type", "condition", "rule_value", "logs", "file_name", "uploaded_by", "uploaded_date"]
+
+    - name: direct_sales
+      purpose: >
+        Direct sales transactions from manufacturer invoices (both raw source `gp_nm_direct_sale` and processed target `gp_nm_direct_sale_tgt`),
+        tracking NDC9/NDC11 codes, package and unit WAC pricing, Prompt Pay discounts, net prices, extended amounts,
+        sold-to and ship-to customer numbers, and class of trade (COT).
+      tables: [gp_nm_direct_sale, gp_nm_direct_sale_tgt]
+      keywords: ["gp_nm_direct_sale", "gp_nm_direct_sale_tgt", "direct sale", "direct sales", "invoice", "invoice_amount", "wac_price", "net_price", "pp_discount", "prompt pay", "amount_net_extended", "amount_wac_extended", "cust_number_soldto", "cust_number_shipto", "contract"]
+
+    - name: ineligible_sales
+      purpose: >
+        Ineligible sales transactions and wholesaler chargebacks across raw source (`gp_nm_inelig_sale`), processed target (`gp_nm_inelig_sale_tgt`),
+        and target chargeback adjustments (`gp_nm_inelig_sale_cbk_tgt`), capturing contract pricing, basis prices, chargeback amounts,
+        wholesaler sold-to/ship-to, customer accounts, and statutory program eligibility for Federal Supply Schedule (FSS) and Public Health Service (PHS 340B).
+      tables: [gp_nm_inelig_sale, gp_nm_inelig_sale_tgt, gp_nm_inelig_sale_cbk_tgt]
+      keywords: ["gp_nm_inelig_sale", "gp_nm_inelig_sale_tgt", "gp_nm_inelig_sale_cbk_tgt", "inelig sale", "ineligible sale", "ineligible sales", "chargeback", "chargeback_amount", "wholesaler", "wholesaler_soldto", "wholesaler_shipto", "fss_elig_ind", "phs_elig_ind", "phs_cp_ind", "basis_price", "extended_wac_amount"]
+
+    - name: rebates_sales
+      purpose: >
+        Rebate and administrative fee sales transactions across raw source (`gp_nm_rebates_sale`), eligible processed target (`gp_nm_elig_rebates_sale_tgt`),
+        and ineligible post-policy target records (`gp_nm_inelig_rebates_sale_tgt`), capturing rebate tier percentages, fee amounts, fee indicators,
+        payer types, contract owners, quarters earned/paid, and rebate recipient Class of Trade.
+      tables: [gp_nm_rebates_sale, gp_nm_elig_rebates_sale_tgt, gp_nm_inelig_rebates_sale_tgt]
+      keywords: ["gp_nm_rebates_sale", "gp_nm_elig_rebates_sale_tgt", "gp_nm_inelig_rebates_sale_tgt", "rebate", "rebates", "ineligible rebate", "ineligible rebates", "rebate_fee_amount", "rebate_tier_percent", "rebate_type", "payer_type", "cust_number_payer", "earned_qtr", "paid_qtr", "rebate_recipient_number", "rebate_recipient_cot", "strategy_id"]
+
+    - name: gp_calculations_and_comparison
+      purpose: >
+        Government pricing non-Medicaid calculation execution (`gp_nm_direct_sale_gp_calc`), source calculation baselines (`gp_nm_direct_sale_gp_calc_src`),
+        Average Manufacturer Price (AMP) metrics, and calculation-to-source comparison and variance analysis (`gp_comparison_results`).
+      tables: [gp_nm_direct_sale_gp_calc, gp_nm_direct_sale_gp_calc_src, gp_comparison_results]
+      keywords: ["gp_nm_direct_sale_gp_calc", "gp_nm_direct_sale_gp_calc_src", "gp_comparison_results", "gp_calc", "amp", "average manufacturer price", "total_unit", "total_amount", "unit_difference", "amount_difference", "comparison", "variance", "invoice_year", "invoice_month", "invoice_quarterly"]
+
+  # ============================================================
+  # BUSINESS TO DATABASE MAPPING RULES
+  # ============================================================
+  mapping_rules:
+    - category: "Direct Sales & Invoicing Rules"
+      rule: "For all direct manufacturer sales queries, query `gp_nm_direct_sale` (raw source) or `gp_nm_direct_sale_tgt` (post-policy filtered target). Calculate revenue using `SUM(INVOICE_AMOUNT)` or `SUM(AMOUNT_NET_EXTENDED)`. For volume, use `SUM(INVOICE_QUANTITY)` or `SUM(INVOICE_UNIT_QTY)`."
+    - category: "Chargeback & Ineligible Sales Rules"
+      rule: "For indirect sales, wholesaler distributions, and chargeback queries, query `gp_nm_inelig_sale` (raw source), `gp_nm_inelig_sale_tgt` (target ineligible), or `gp_nm_inelig_sale_cbk_tgt` (target chargeback). Calculate chargeback exposure using `SUM(CHARGEBACK_AMOUNT)`. Filter by `WHOLESALER_SOLDTO` or `WHOLESALER_SHIPTO` for wholesaler-specific metrics."
+    - category: "Rebates & Fee Administration Rules"
+      rule: "For customer rebate and fee administration queries, query `gp_nm_rebates_sale` (raw rebate transactions), `gp_nm_elig_rebates_sale_tgt` (eligible rebates for GP), or `gp_nm_inelig_rebates_sale_tgt` (ineligible excluded rebates). Key metrics are `SUM(REBATE_FEE_AMOUNT)`, `AVG(REBATE_TIER_PERCENT)`, and `COUNT(TRANSACTION_ID)` grouped by `PAYER_TYPE`, `REBATE_TYPE`, `EARNED_QTR`, or `PAID_QTR`."
+    - category: "Government Pricing AMP & Calculation Rules"
+      rule: "For Government Pricing (GP) Non-Medicaid calculation results and Average Manufacturer Price (AMP) metrics, query `gp_nm_direct_sale_gp_calc`. Key fields are `amp`, `total_unit`, `total_amount`, `component`, `invoice_year`, `invoice_month`, and `invoice_quarterly` grouped by `product_name` or `ndc11`."
+    - category: "GP Calculation Baseline Source Rules"
+      rule: "For calculation baseline source figures prior to government pricing rule adjustments, query `gp_nm_direct_sale_gp_calc_src` on `item_id`, `ndc11`, `invoice_year`, `invoice_month`, or `invoice_quarterly`."
+    - category: "GP Comparison & Variance Analysis Rules"
+      rule: "To analyze discrepancies, variances, unit/amount differences, and reconciliation status between calculated GP values and baseline source values, query `gp_comparison_results`. Key metrics are `unit_difference`, `amount_difference`, `status`, `gp_nm_direct_sale_gp_calc_total_amount`, and `gp_nm_direct_sale_gp_calc_src_total_amount`."
+    - category: "Audit & Processing Logs Rules"
+      rule: "For tracking file uploads, pipeline job statuses, upload timestamps, and user activity by price type, query `gp_logs`. Check `file_name`, `uploaded_by`, `uploaded_date`, `price_type`, and `status`."
+    - category: "Policy Filtering & Statutory Rules"
+      rule: "For government pricing policy rules, status, and filter conditions, query `gp_nm_policy_filter`. Check `Price_Type`, `Rule_Name`, `Condition`, `Rule_Value`, and `Code` to inspect filtering parameters applied to transactions."
+    - category: "Prompt Pay Discount Rules"
+      rule: "Prompt Pay (PP) discount queries must use `gp_nm_direct_sale` or `gp_nm_direct_sale_tgt`. Key fields are `PP_DISCOUNT_PCT`, `PP_DISCOUNT_AMOUNT`, `PP_DISCOUNT_AMOUNT_UNIT`, and `INVOICE_AMOUNT_MINUS_PP`."
+    - category: "WAC vs. Net Pricing Rules"
+      rule: "Package-level WAC and Net prices are `WAC_PRICE_PKG` and `NET_PRICE_PKG`. Unit-level prices are `WAC_PRICE_UNIT` and `NET_PRICE_UNIT`. Extended WAC is `AMOUNT_WAC_EXTENDED` (in direct sales) or `EXTENDED_WAC_AMOUNT` (in chargebacks/rebates)."
+    - category: "Statutory Eligibility (FSS & PHS 340B) Rules"
+      rule: "To analyze government pricing statutory eligibility, query `gp_nm_inelig_sale` or `gp_nm_inelig_sale_tgt`. Filter on `FSS_ELIG_IND` for Federal Supply Schedule eligibility and `PHS_ELIG_IND` / `PHS_CP_IND` for 340B Public Health Service eligibility."
+    - category: "Government Pricing Component Configuration"
+      rule: "For non-Medicaid calculation configuration, query `gp_nm_config`. Check `smoothing_required` and `proration_required` flags ('Y'/'N' or 'YES'/'NO') alongside `required_flag` and `component_type`."
+    - category: "Source to Target Reconciliation Rules"
+      rule: "To analyze filtering effectiveness, reconcile raw source transactions against target tables on `TRANSACTION_ID`: direct sales (`gp_nm_direct_sale` vs `gp_nm_direct_sale_tgt`), chargebacks (`gp_nm_inelig_sale` vs `gp_nm_inelig_sale_tgt`), and rebates (`gp_nm_rebates_sale` vs `gp_nm_elig_rebates_sale_tgt` and `gp_nm_inelig_rebates_sale_tgt`)."
+    - category: "Chargeback Adjudication Line Analysis"
+      rule: "Compare target ineligible sales (`gp_nm_inelig_sale_tgt`) and chargeback adjustments (`gp_nm_inelig_sale_cbk_tgt`) on `TRANSACTION_ID` or `CHARGEBACK_KEY` to evaluate approved vs adjusted chargeback amounts."
+    - category: "Policy Filter Governance Association"
+      rule: "Link `gp_nm_policy_filter` with `gp_nm_config` using `gp_nm_policy_filter.Code = gp_nm_config.code` to inspect how active policy filtering conditions drive government price calculations for specific components."
+    - category: "Read-Only Mandate"
+      rule: "Generate only read-only SELECT queries. Do not perform INSERT, UPDATE, DELETE, or DDL operations on PriceAssure tables."
+
+  # ============================================================
+  # EXPLICIT JOIN PATHS
+  # ============================================================
+  joins:
+    - name: direct_source_to_target
+      left_table: gp_nm_direct_sale
+      right_table: gp_nm_direct_sale_tgt
+      join_condition: "gp_nm_direct_sale.TRANSACTION_ID = gp_nm_direct_sale_tgt.TRANSACTION_ID"
+      description: "Reconciles raw direct sales against post-policy filtered target direct sales on TRANSACTION_ID."
+
+    - name: inelig_source_to_target
+      left_table: gp_nm_inelig_sale
+      right_table: gp_nm_inelig_sale_tgt
+      join_condition: "gp_nm_inelig_sale.TRANSACTION_ID = gp_nm_inelig_sale_tgt.TRANSACTION_ID"
+      description: "Reconciles raw ineligible sales against filtered target ineligible sales on TRANSACTION_ID."
+
+    - name: inelig_target_to_cbk_target
+      left_table: gp_nm_inelig_sale_tgt
+      right_table: gp_nm_inelig_sale_cbk_tgt
+      join_condition: "gp_nm_inelig_sale_tgt.TRANSACTION_ID = gp_nm_inelig_sale_cbk_tgt.TRANSACTION_ID"
+      description: "Links target ineligible sales with corresponding chargeback target records on TRANSACTION_ID."
+
+    - name: rebates_source_to_target
+      left_table: gp_nm_rebates_sale
+      right_table: gp_nm_elig_rebates_sale_tgt
+      join_condition: "gp_nm_rebates_sale.TRANSACTION_ID = gp_nm_elig_rebates_sale_tgt.TRANSACTION_ID"
+      description: "Reconciles raw rebate sales against eligible target rebate records on TRANSACTION_ID."
+
+    - name: direct_to_inelig_by_ndc11
+      left_table: gp_nm_direct_sale
+      right_table: gp_nm_inelig_sale
+      join_condition: "gp_nm_direct_sale.NDC11 = gp_nm_inelig_sale.NDC11"
+      description: "Correlates direct manufacturer sales with indirect chargeback transactions for the same 11-digit National Drug Code."
+
+    - name: direct_target_to_inelig_target_by_ndc11
+      left_table: gp_nm_direct_sale_tgt
+      right_table: gp_nm_inelig_sale_tgt
+      join_condition: "gp_nm_direct_sale_tgt.NDC11 = gp_nm_inelig_sale_tgt.NDC11"
+      description: "Correlates filtered target direct sales with filtered target ineligible sales on NDC11."
+
+    - name: direct_to_rebates_by_ndc11
+      left_table: gp_nm_direct_sale
+      right_table: gp_nm_rebates_sale
+      join_condition: "gp_nm_direct_sale.NDC11 = gp_nm_rebates_sale.NDC11"
+      description: "Correlates direct sales transactions with customer rebate transactions on NDC11."
+
+    - name: direct_target_to_rebates_target_by_ndc11
+      left_table: gp_nm_direct_sale_tgt
+      right_table: gp_nm_elig_rebates_sale_tgt
+      join_condition: "gp_nm_direct_sale_tgt.NDC11 = gp_nm_elig_rebates_sale_tgt.NDC11"
+      description: "Correlates filtered target direct sales with eligible target rebates on NDC11."
+
+    - name: rebates_to_inelig_by_ndc11
+      left_table: gp_nm_rebates_sale
+      right_table: gp_nm_inelig_sale
+      join_condition: "gp_nm_rebates_sale.NDC11 = gp_nm_inelig_sale.NDC11"
+      description: "Correlates raw rebate transactions with raw chargeback transactions on NDC11."
+
+    - name: rebates_target_to_inelig_target_by_ndc11
+      left_table: gp_nm_elig_rebates_sale_tgt
+      right_table: gp_nm_inelig_sale_tgt
+      join_condition: "gp_nm_elig_rebates_sale_tgt.NDC11 = gp_nm_inelig_sale_tgt.NDC11"
+      description: "Correlates eligible target rebates with target chargeback records on NDC11."
+
+    - name: direct_to_inelig_by_contract
+      left_table: gp_nm_direct_sale
+      right_table: gp_nm_inelig_sale
+      join_condition: "gp_nm_direct_sale.CONTRACT = gp_nm_inelig_sale.CONTRACT"
+      description: "Links direct sales agreements with indirect chargeback transactions under the same customer or institutional contract."
+
+    - name: direct_target_to_inelig_target_by_contract
+      left_table: gp_nm_direct_sale_tgt
+      right_table: gp_nm_inelig_sale_tgt
+      join_condition: "gp_nm_direct_sale_tgt.CONTRACT = gp_nm_inelig_sale_tgt.CONTRACT"
+      description: "Links target direct sales with target ineligible sales under the same contract."
+
+    - name: rebates_to_contract
+      left_table: gp_nm_rebates_sale
+      right_table: gp_nm_direct_sale
+      join_condition: "gp_nm_rebates_sale.CONTRACT = gp_nm_direct_sale.CONTRACT"
+      description: "Links customer rebate sales with direct sales under the same contract agreement."
+
+    - name: rebates_target_to_direct_target_by_contract
+      left_table: gp_nm_elig_rebates_sale_tgt
+      right_table: gp_nm_direct_sale_tgt
+      join_condition: "gp_nm_elig_rebates_sale_tgt.CONTRACT = gp_nm_direct_sale_tgt.CONTRACT"
+      description: "Links eligible target rebates with target direct sales under the same contract agreement."
+
+    - name: rebates_source_to_inelig_target
+      left_table: gp_nm_rebates_sale
+      right_table: gp_nm_inelig_rebates_sale_tgt
+      join_condition: "gp_nm_rebates_sale.TRANSACTION_ID = gp_nm_inelig_rebates_sale_tgt.TRANSACTION_ID"
+      description: "Reconciles raw rebate sales against ineligible target rebate records on TRANSACTION_ID."
+
+    - name: direct_target_to_inelig_rebates_by_ndc11
+      left_table: gp_nm_direct_sale_tgt
+      right_table: gp_nm_inelig_rebates_sale_tgt
+      join_condition: "gp_nm_direct_sale_tgt.NDC11 = gp_nm_inelig_rebates_sale_tgt.NDC11"
+      description: "Correlates filtered direct sales with ineligible target rebates on NDC11."
+
+    - name: rebates_inelig_target_to_direct_by_contract
+      left_table: gp_nm_inelig_rebates_sale_tgt
+      right_table: gp_nm_direct_sale
+      join_condition: "gp_nm_inelig_rebates_sale_tgt.CONTRACT = gp_nm_direct_sale.CONTRACT"
+      description: "Links ineligible target rebates with direct sales agreements under the same contract."
+
+    - name: gp_calc_to_calc_src_by_item
+      left_table: gp_nm_direct_sale_gp_calc
+      right_table: gp_nm_direct_sale_gp_calc_src
+      join_condition: "gp_nm_direct_sale_gp_calc.item_id = gp_nm_direct_sale_gp_calc_src.item_id"
+      description: "Links GP calculated records with baseline source calculation records on item_id."
+
+    - name: gp_comparison_to_calc
+      left_table: gp_comparison_results
+      right_table: gp_nm_direct_sale_gp_calc
+      join_condition: "gp_comparison_results.item_id = gp_nm_direct_sale_gp_calc.item_id"
+      description: "Links comparison variance results with calculated GP direct sale metrics on item_id."
+
+    - name: gp_comparison_to_calc_src
+      left_table: gp_comparison_results
+      right_table: gp_nm_direct_sale_gp_calc_src
+      join_condition: "gp_comparison_results.item_id = gp_nm_direct_sale_gp_calc_src.item_id"
+      description: "Links comparison variance results with source baseline calculation metrics on item_id."
+
+    - name: gp_logs_to_policy_filter
+      left_table: gp_logs
+      right_table: gp_nm_policy_filter
+      join_condition: "gp_logs.price_type = gp_nm_policy_filter.Price_Type"
+      description: "Correlates file processing audit logs with policy filter pricing types."
+
+    - name: policy_filter_to_config
+      left_table: gp_nm_policy_filter
+      right_table: gp_nm_config
+      join_condition: "gp_nm_policy_filter.Code = gp_nm_config.code"
+      description: "Links policy filter rules to government pricing calculation configuration on component code."
+
+  # ============================================================
+  # PRE-DEFINED SQL MEASURES
+  # ============================================================
+  measures:
+    - name: total_direct_sales_summary
+      description: "Total invoice amount, net amount, and total quantity across direct sales"
+      sql: "SELECT COUNT(TRANSACTION_ID) as total_transactions, SUM(INVOICE_AMOUNT) as total_invoice_amount, SUM(AMOUNT_NET_EXTENDED) as total_net_amount, SUM(INVOICE_QUANTITY) as total_quantity FROM gp_nm_direct_sale"
+
+    - name: direct_sales_by_product
+      description: "Direct sales revenue and quantity broken down by product and NDC11"
+      sql: "SELECT PRODUCT_DESC, NDC11, COUNT(TRANSACTION_ID) as transaction_count, SUM(INVOICE_AMOUNT) as total_sales, AVG(NET_PRICE_PKG) as avg_net_pkg_price, AVG(WAC_PRICE_PKG) as avg_wac_pkg_price FROM gp_nm_direct_sale GROUP BY PRODUCT_DESC, NDC11 ORDER BY total_sales DESC"
+
+    - name: target_direct_sales_summary
+      description: "Post-filter target direct sales summary metrics"
+      sql: "SELECT COUNT(TRANSACTION_ID) as target_sales_count, SUM(INVOICE_AMOUNT) as target_invoice_amount, SUM(AMOUNT_NET_EXTENDED) as target_net_amount FROM gp_nm_direct_sale_tgt"
+
+    - name: raw_vs_target_direct_sales_reconciliation
+      description: "Reconciliation of transaction volume and sales revenue between raw direct sales and post-filter target direct sales"
+      sql: "SELECT 'Raw Direct Sales' as dataset, COUNT(TRANSACTION_ID) as record_count, SUM(INVOICE_AMOUNT) as total_invoiced, SUM(AMOUNT_NET_EXTENDED) as total_net FROM gp_nm_direct_sale UNION ALL SELECT 'Target Direct Sales' as dataset, COUNT(TRANSACTION_ID) as record_count, SUM(INVOICE_AMOUNT) as total_invoiced, SUM(AMOUNT_NET_EXTENDED) as total_net FROM gp_nm_direct_sale_tgt"
+
+    - name: total_chargeback_summary
+      description: "Total chargeback amount and volume from ineligible wholesaler sales"
+      sql: "SELECT COUNT(TRANSACTION_ID) as total_ineligible_records, SUM(CHARGEBACK_AMOUNT) as total_chargebacks, SUM(EXTENDED_WAC_AMOUNT) as total_wac_extended, SUM(INVOICE_QUANTITY) as total_quantity FROM gp_nm_inelig_sale"
+
+    - name: chargebacks_by_wholesaler
+      description: "Chargeback amounts and invoice totals grouped by wholesaler sold-to"
+      sql: "SELECT WHOLESALER_SOLDTO, WHOLESALER_SOLDTO_COT, COUNT(TRANSACTION_ID) as transaction_count, SUM(CHARGEBACK_AMOUNT) as total_chargebacks, SUM(INVOICE_AMOUNT) as total_invoice_amount FROM gp_nm_inelig_sale GROUP BY WHOLESALER_SOLDTO, WHOLESALER_SOLDTO_COT ORDER BY total_chargebacks DESC"
+
+    - name: target_chargebacks_summary
+      description: "Target chargeback summary by wholesaler from gp_nm_inelig_sale_cbk_tgt"
+      sql: "SELECT WHOLESALER_SOLDTO, COUNT(TRANSACTION_ID) as cbk_count, SUM(CHARGEBACK_AMOUNT) as total_chargebacks, SUM(EXTENDED_WAC_AMOUNT) as total_wac FROM gp_nm_inelig_sale_cbk_tgt GROUP BY WHOLESALER_SOLDTO ORDER BY total_chargebacks DESC"
+
+    - name: total_rebates_raw_summary
+      description: "Total rebate fee amounts and invoice values for raw rebate transactions"
+      sql: "SELECT COUNT(TRANSACTION_ID) as total_rebates_count, SUM(REBATE_FEE_AMOUNT) as total_fee_amount, AVG(REBATE_TIER_PERCENT) as avg_tier_pct, SUM(INVOICE_AMOUNT) as total_invoice_amount FROM gp_nm_rebates_sale"
+
+    - name: total_eligible_rebates_summary
+      description: "Total rebate fee amounts and invoice values for eligible rebates target sales"
+      sql: "SELECT COUNT(TRANSACTION_ID) as total_rebate_transactions, SUM(REBATE_FEE_AMOUNT) as total_rebate_amount, AVG(REBATE_TIER_PERCENT) as avg_rebate_tier_pct, SUM(INVOICE_AMOUNT) as total_invoice_amount FROM gp_nm_elig_rebates_sale_tgt"
+
+    - name: rebates_by_payer_type
+      description: "Rebate fee amounts and transaction counts grouped by payer type and rebate type"
+      sql: "SELECT PAYER_TYPE, REBATE_TYPE, COUNT(TRANSACTION_ID) as transaction_count, SUM(REBATE_FEE_AMOUNT) as total_rebates, SUM(INVOICE_AMOUNT) as total_invoiced FROM gp_nm_elig_rebates_sale_tgt GROUP BY PAYER_TYPE, REBATE_TYPE ORDER BY total_rebates DESC"
+
+    - name: rebates_by_quarter
+      description: "Rebate disbursements analyzed by earned quarter and paid quarter"
+      sql: "SELECT EARNED_QTR, PAID_QTR, COUNT(TRANSACTION_ID) as record_count, SUM(REBATE_FEE_AMOUNT) as total_rebate_fees, SUM(EXTENDED_WAC_AMOUNT) as total_wac_volume FROM gp_nm_elig_rebates_sale_tgt GROUP BY EARNED_QTR, PAID_QTR ORDER BY EARNED_QTR DESC, PAID_QTR DESC"
+
+    - name: raw_vs_eligible_rebates_reconciliation
+      description: "Reconciliation of transaction counts and fee amounts between raw rebate sales and eligible target rebate records"
+      sql: "SELECT 'Raw Rebate Sales' as dataset, COUNT(TRANSACTION_ID) as record_count, SUM(REBATE_FEE_AMOUNT) as total_fees, SUM(INVOICE_AMOUNT) as total_invoiced FROM gp_nm_rebates_sale UNION ALL SELECT 'Eligible Target Rebates' as dataset, COUNT(TRANSACTION_ID) as record_count, SUM(REBATE_FEE_AMOUNT) as total_fees, SUM(INVOICE_AMOUNT) as total_invoiced FROM gp_nm_elig_rebates_sale_tgt"
+
+    - name: ineligible_rebates_summary
+      description: "Total rebate fee amounts and transaction counts for post-policy ineligible rebates"
+      sql: "SELECT COUNT(TRANSACTION_ID) as ineligible_rebate_count, SUM(REBATE_FEE_AMOUNT) as total_ineligible_fees, AVG(REBATE_TIER_PERCENT) as avg_tier, SUM(INVOICE_AMOUNT) as total_invoiced FROM gp_nm_inelig_rebates_sale_tgt"
+
+    - name: rebates_eligibility_reconciliation
+      description: "Rebate fee amounts and record counts reconciled between eligible and ineligible targets"
+      sql: "SELECT 'Eligible Target Rebates' as rebate_status, COUNT(TRANSACTION_ID) as record_count, SUM(REBATE_FEE_AMOUNT) as total_fees FROM gp_nm_elig_rebates_sale_tgt UNION ALL SELECT 'Ineligible Target Rebates' as rebate_status, COUNT(TRANSACTION_ID) as record_count, SUM(REBATE_FEE_AMOUNT) as total_fees FROM gp_nm_inelig_rebates_sale_tgt"
+
+    - name: gp_calc_amp_by_product_quarter
+      description: "AMP calculation values, total units, and total amounts by product, component, and quarter"
+      sql: "SELECT product_name, ndc11, component, invoice_year, invoice_quarterly, total_unit, total_amount, amp FROM gp_nm_direct_sale_gp_calc ORDER BY invoice_year DESC, invoice_quarterly DESC"
+
+    - name: gp_comparison_status_summary
+      description: "Overall reconciliation status and total variance sums from GP comparison results"
+      sql: "SELECT status, COUNT(*) as record_count, SUM(amount_difference) as total_amount_variance, SUM(unit_difference) as total_unit_variance FROM gp_comparison_results GROUP BY status"
+
+    - name: gp_comparison_discrepancies
+      description: "Detailed list of items with calculation vs baseline source discrepancies"
+      sql: "SELECT item_id, ndc11, product_name, component, unit_difference, amount_difference, status, invoice_year, invoice_quarterly FROM gp_comparison_results WHERE status != 'MATCH' OR amount_difference != 0 ORDER BY amount_difference DESC"
+
+    - name: gp_upload_logs_recent
+      description: "Recent file upload activity, uploaders, price types, and processing statuses"
+      sql: "SELECT id, file_name, uploaded_by, uploaded_date, price_type, status FROM gp_logs ORDER BY uploaded_date DESC LIMIT 25"
+
+    - name: active_policy_filters_overview
+      description: "List of active government pricing policy filters and conditions"
+      sql: "SELECT Policy_id, Policy_Name, Price_Type, Status, Rule_Name, Condition, Rule_Value, Code FROM gp_nm_policy_filter WHERE Status = 'Active' ORDER BY Policy_id ASC"
+
+    - name: policy_filters_by_price_type
+      description: "Distribution of policy filter rules across price types and active statuses"
+      sql: "SELECT Price_Type, COUNT(Policy_id) as total_policies, SUM(CASE WHEN Status = 'Active' THEN 1 ELSE 0 END) as active_policies FROM gp_nm_policy_filter GROUP BY Price_Type ORDER BY total_policies DESC"
+
+    - name: prompt_pay_discount_summary
+      description: "Total prompt pay discount amount and average discount percentage by product"
+      sql: "SELECT PRODUCT_DESC, SUM(PP_DISCOUNT_AMOUNT) as total_pp_discount, AVG(PP_DISCOUNT_PCT) as avg_pp_discount_pct, SUM(INVOICE_AMOUNT_MINUS_PP) as total_amount_after_pp FROM gp_nm_direct_sale GROUP BY PRODUCT_DESC ORDER BY total_pp_discount DESC"
+
+    - name: phs_fss_eligibility_breakdown
+      description: "Ineligible sales distribution by Public Health Service (PHS) and Federal Supply Schedule (FSS) eligibility indicators"
+      sql: "SELECT FSS_ELIG_IND, PHS_ELIG_IND, PHS_CP_IND, COUNT(TRANSACTION_ID) as record_count, SUM(CHARGEBACK_AMOUNT) as total_chargebacks, SUM(INVOICE_AMOUNT) as total_invoice_amount FROM gp_nm_inelig_sale GROUP BY FSS_ELIG_IND, PHS_ELIG_IND, PHS_CP_IND ORDER BY total_chargebacks DESC"
+
+    - name: gp_component_configuration_list
+      description: "Government pricing non-Medicaid calculation configuration rules, smoothing, and proration requirements"
+      sql: "SELECT id, component, code, component_type, required_flag, smoothing_required, proration_required FROM gp_nm_config ORDER BY id ASC"
+
+  sources:
+    - name: mysql_priceassure
+      database: gp
+      tables:
+
+        # =====================================================
+        # TABLE 1: gp_nm_config
+        # =====================================================
+        - name: gp_nm_config
+          description: >
+            Government Pricing (GP) Non-Medicaid (NM) calculation component configuration.
+            Controls component codes, required flags, smoothing requirements, and proration rules.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique auto-increment configuration identifier"
+            - name: component
+              type: string
+              description: "Component name for government pricing calculation (e.g. WAC, AMP, Best Price, Direct Sales)"
+            - name: code
+              type: string
+              description: "Short 2-character component classification code"
+            - name: required_flag
+              type: string
+              description: "Indicates whether component is required for GP non-Medicaid calculation ('YES'/'NO' or 'Y'/'N')"
+            - name: smoothing_required
+              type: string
+              description: "Flag indicating whether smoothing methodology is required for price fluctuations"
+            - name: proration_required
+              type: string
+              description: "Flag indicating whether proration across reporting periods is required"
+            - name: component_type
+              type: string
+              description: "Classification type of the calculation component"
+
+        # =====================================================
+        # TABLE 2: gp_nm_direct_sale
+        # =====================================================
+        - name: gp_nm_direct_sale
+          description: >
+            Direct sales transactions recorded from manufacturer invoices for Government Pricing Non-Medicaid calculations.
+            Contains product descriptions, NDC codes, package/unit WAC prices, Prompt Pay (PP) discounts, net pricing,
+            customer sold-to/ship-to accounts, and contract terms.
+          columns:
+            - name: TRANSACTION_ID
+              type: primary_key
+              description: "Unique direct sale transaction identifier"
+            - name: SOURCE_ID
+              type: integer
+              description: "Identifier of the source data feed or billing system"
+            - name: CREATE_DATE
+              type: date
+              description: "Record creation date in the database"
+            - name: SALES_KEY
+              type: string
+              description: "Unique business sales transaction reference key"
+            - name: NDC11
+              type: bigint
+              description: "11-digit National Drug Code identifier for the product package"
+            - name: NDC9
+              type: bigint
+              description: "9-digit National Drug Code representing labeler and product code"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Commercial description / brand name of the pharmaceutical product"
+            - name: PROD_SIZE
+              type: integer
+              description: "Package size / quantity per package unit"
+            - name: BILLING_DOC_TYPE
+              type: string
+              description: "Billing document type classification code"
+            - name: ORDER_TYPE
+              type: string
+              description: "Sales order type classification"
+            - name: ORDER_REASON_CODE
+              type: string
+              description: "Order reason code indicating commercial context"
+            - name: PAYMENT_TERMS
+              type: string
+              description: "Customer invoice payment terms (e.g. Net 30, Prompt Pay)"
+            - name: INVOICE_NUMBER
+              type: bigint
+              description: "Commercial billing invoice number"
+            - name: INVOICE_LINE_NUMBER
+              type: integer
+              description: "Line item position number on the billing invoice"
+            - name: INVOICE_DATE
+              type: date
+              description: "Date the commercial invoice was issued"
+            - name: EARNED_DATE
+              type: date
+              description: "Accounting revenue earned date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Gross invoice sales amount in currency units"
+            - name: INVOICE_QUANTITY
+              type: decimal
+              description: "Number of packages invoiced"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Total individual dosage units invoiced"
+            - name: PACKAGE_PRICE
+              type: decimal
+              description: "Invoiced price per package"
+            - name: MEDI_UNIT_PRICE
+              type: decimal
+              description: "Medical unit price"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "Wholesale Acquisition Cost (WAC) per package"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "Wholesale Acquisition Cost (WAC) per dosage unit"
+            - name: PP_DISCOUNT_PCT
+              type: integer
+              description: "Prompt Pay discount percentage applied"
+            - name: PP_DISCOUNT_AMOUNT
+              type: decimal
+              description: "Total Prompt Pay discount amount deducted"
+            - name: PP_DISCOUNT_AMOUNT_UNIT
+              type: decimal
+              description: "Prompt Pay discount amount per dosage unit"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net realized price per package after discounts"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net realized price per unit"
+            - name: AMOUNT_NET_EXTENDED
+              type: decimal
+              description: "Extended total net amount for the transaction line"
+            - name: AMOUNT_WAC_EXTENDED
+              type: decimal
+              description: "Extended total WAC valuation amount (WAC * Quantity)"
+            - name: CUST_NUMBER_SHIPTO
+              type: bigint
+              description: "Customer Ship-To account number identifier"
+            - name: CUST_NUMBER_SHIPTO_COT
+              type: string
+              description: "Class of Trade (COT) code for the Ship-To customer"
+            - name: CUST_NUMBER_SHIPTO_NAME
+              type: bigint
+              description: "Ship-To customer entity identifier/name"
+            - name: CUST_NUMBER_SOLDTO
+              type: bigint
+              description: "Customer Sold-To account number identifier"
+            - name: CUST_NUMBER_SOLDTO_COT
+              type: string
+              description: "Class of Trade (COT) code for the Sold-To customer"
+            - name: CUST_NUMBER_SOLDTO_NAME
+              type: bigint
+              description: "Sold-To customer entity identifier/name"
+            - name: DIVISION_CD
+              type: string
+              description: "Corporate division code"
+            - name: INVOICE_AMOUNT_MINUS_PP
+              type: decimal
+              description: "Invoice amount net of prompt pay discount"
+            - name: OI_DISCOUNT_AMOUNT
+              type: decimal
+              description: "Order incentive discount amount"
+            - name: OI_DISCOUNT_AMOUNT_UNIT
+              type: decimal
+              description: "Order incentive discount amount per unit"
+            - name: NET_PRICE_PKG_PP
+              type: decimal
+              description: "Net price per package after Prompt Pay deduction"
+            - name: NET_PRICE_UNIT_PP
+              type: decimal
+              description: "Net price per unit after Prompt Pay deduction"
+            - name: CONTRACT
+              type: string
+              description: "Commercial pricing contract identifier"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract classification type"
+            - name: flag
+              type: string
+              description: "Processing status flag"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code of the transaction (e.g. US)"
+
+        # =====================================================
+        # TABLE 3: gp_nm_inelig_sale
+        # =====================================================
+        - name: gp_nm_inelig_sale
+          description: >
+            Ineligible sales transactions and wholesaler chargebacks for Government Pricing Non-Medicaid calculations.
+            Tracks chargeback claims, contract prices, wholesaler sold-to/ship-to, customer accounts,
+            and federal statutory program eligibility (FSS, PHS 340B).
+          columns:
+            - name: TRANSACTION_ID
+              type: primary_key
+              description: "Unique chargeback / ineligible sale transaction identifier"
+            - name: SOURCE_ID
+              type: integer
+              description: "Source feed / EDI 844 chargeback feed identifier"
+            - name: CREATE_DATE
+              type: date
+              description: "Date the chargeback record was loaded"
+            - name: CHARGEBACK_KEY
+              type: string
+              description: "Unique wholesaler chargeback line reference key"
+            - name: NDC11
+              type: string
+              description: "11-digit National Drug Code identifier"
+            - name: NDC9
+              type: string
+              description: "9-digit National Drug Code identifier"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Pharmaceutical product brand name / description"
+            - name: PROD_SIZE
+              type: integer
+              description: "Package unit size"
+            - name: BILLING_TYPE
+              type: string
+              description: "Billing type classification"
+            - name: ORDER_TYPE
+              type: string
+              description: "Order type classification"
+            - name: ORDER_REASON_CODE
+              type: string
+              description: "Chargeback order reason code"
+            - name: ITEM_CATEGORY
+              type: string
+              description: "Line item classification category"
+            - name: BILLING_DOCUMENT
+              type: string
+              description: "Wholesaler billing document reference number"
+            - name: INVOICE_DATE
+              type: date
+              description: "Invoice transaction date"
+            - name: SETTLEMENT_DATE
+              type: date
+              description: "Chargeback settlement / adjudication date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Invoice amount for the chargeback line"
+            - name: INVOICE_QUANTITY
+              type: decimal
+              description: "Package quantity adjudicated"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Total dosage units adjudicated"
+            - name: CONTRACT_PRICE_PKG
+              type: decimal
+              description: "Contracted price per package agreed with customer"
+            - name: CONTRACT_PRICE_UNIT
+              type: decimal
+              description: "Contracted price per dosage unit"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "Wholesale Acquisition Cost (WAC) per package at settlement"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "Wholesale Acquisition Cost (WAC) per unit"
+            - name: CHARGEBACK_AMOUNT
+              type: decimal
+              description: "Chargeback reimbursement amount (WAC - Contract Price)"
+            - name: CHARGEBACK_AMOUNT_UNIT
+              type: decimal
+              description: "Chargeback amount per dosage unit"
+            - name: EXTENDED_WAC_AMOUNT
+              type: decimal
+              description: "Total extended WAC valuation (WAC * Quantity)"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net price per package"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net price per unit"
+            - name: BASIS_PRICE_PKG
+              type: decimal
+              description: "Basis price per package used for GP calculations"
+            - name: BASIS_PRICE_UNIT
+              type: decimal
+              description: "Basis price per dosage unit"
+            - name: EXTENDED_BASIS_AMOUNT
+              type: decimal
+              description: "Extended total basis amount"
+            - name: CONTRACT
+              type: string
+              description: "Pricing contract identifier referenced by chargeback"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract classification type (e.g. GPO, IDN, PHS, FSS)"
+            - name: WHOLESALER_SOLDTO
+              type: string
+              description: "Wholesaler Sold-To account identifier"
+            - name: WHOLESALER_SOLDTO_COT
+              type: string
+              description: "Class of Trade (COT) code for wholesaler Sold-To"
+            - name: WHOLESALER_SHIPTO
+              type: string
+              description: "Wholesaler Ship-To account identifier"
+            - name: WHOLESALER_SHIPTO_COT
+              type: string
+              description: "Class of Trade (COT) code for wholesaler Ship-To"
+            - name: CUSTOMER_SOLDTO_SOURCE_ID
+              type: string
+              description: "End-customer Sold-To identifier from source system"
+            - name: CUSTOMER_SOLDTO_COT
+              type: string
+              description: "Class of Trade (COT) code for end-customer Sold-To"
+            - name: CUSTOMER_SHIPTO_SOURCE_ID
+              type: string
+              description: "End-customer Ship-To identifier from source system"
+            - name: CUSTOMER_SHIPTO_COT
+              type: string
+              description: "Class of Trade (COT) code for end-customer Ship-To"
+            - name: DIVISION_CD
+              type: string
+              description: "Corporate division code"
+            - name: FSS_ELIG_IND
+              type: string
+              description: "Federal Supply Schedule (FSS) eligibility indicator ('Y'/'N')"
+            - name: PHS_ELIG_IND
+              type: string
+              description: "Public Health Service (PHS / 340B) eligibility indicator ('Y'/'N')"
+            - name: PHS_CP_IND
+              type: string
+              description: "Public Health Service covered entity price indicator"
+            - name: CALC_CONTRACT_PRICE
+              type: decimal
+              description: "Calculated statutory contract price"
+            - name: PHS_COMMERCIAL
+              type: string
+              description: "PHS commercial classification indicator"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code (e.g. US)"
+            - name: flag
+              type: string
+              description: "Record status flag"
+
+        # =====================================================
+        # TABLE 4: gp_nm_rebates_sale
+        # =====================================================
+        - name: gp_nm_rebates_sale
+          description: >
+            Rebate and administrative fee sales transactions recorded for Government Pricing Non-Medicaid calculations.
+            Tracks rebate tier percentages, fee amounts, payer details, contract numbers, quarterly periods, and rebate recipient information.
+          columns:
+            - name: TRANSACTION_ID
+              type: primary_key
+              description: "Unique rebate transaction identifier (AUTO_INCREMENT)"
+            - name: SOURCE_ID
+              type: string
+              description: "Source system / data feed identifier"
+            - name: CREATE_DATE
+              type: datetime
+              description: "Creation timestamp of the rebate record"
+            - name: REBATE_FEE_KEY
+              type: string
+              description: "Unique business rebate/fee reference key"
+            - name: NDC11
+              type: string
+              description: "11-digit National Drug Code identifier"
+            - name: NDC9
+              type: string
+              description: "9-digit National Drug Code identifier"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Product brand name / commercial description"
+            - name: MEDI_UNITS_PER_PKG
+              type: decimal
+              description: "Medical dosage units per package"
+            - name: ORDER_TYPE
+              type: string
+              description: "Order classification type"
+            - name: INVOICE_TYPE
+              type: string
+              description: "Invoice classification type"
+            - name: BILLING_DOCUMENT
+              type: string
+              description: "Billing document reference identifier"
+            - name: BILLING_DOC_ITEM
+              type: string
+              description: "Item number within the billing document"
+            - name: INVOICE_DATE
+              type: date
+              description: "Date the invoice was generated"
+            - name: SETTLEMENT_DATE
+              type: date
+              description: "Date the rebate was settled/adjudicated"
+            - name: PERIOD_START_DATE
+              type: date
+              description: "Start date of the rebate reporting period"
+            - name: PERIOD_END_DATE
+              type: date
+              description: "End date of the rebate reporting period"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Invoiced gross sales amount"
+            - name: INVOICE_PKG_QTY
+              type: decimal
+              description: "Invoiced package quantity"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Invoiced individual unit quantity"
+            - name: UNIT_TYPE
+              type: string
+              description: "Unit of measurement (e.g. TAB, CAP, VIAL)"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "Wholesale Acquisition Cost per package"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "Wholesale Acquisition Cost per unit"
+            - name: REBATE_TIER_PERCENT
+              type: decimal
+              description: "Rebate tier percentage applied"
+            - name: REBATE_FEE_AMOUNT
+              type: decimal
+              description: "Total rebate/fee amount paid or accrued"
+            - name: REBATE_FEE_AMOUNT_UNIT
+              type: decimal
+              description: "Rebate fee amount per unit"
+            - name: REBATE_FEE_IND
+              type: string
+              description: "Rebate fee indicator classification"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net price per package after rebates"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net price per unit after rebates"
+            - name: BASIS_PRICE_PKG
+              type: decimal
+              description: "Basis price per package for GP calculation"
+            - name: BASIS_PRICE_UNIT
+              type: decimal
+              description: "Basis price per unit for GP calculation"
+            - name: EXTENDED_WAC_AMOUNT
+              type: decimal
+              description: "Total extended WAC valuation (WAC * Quantity)"
+            - name: PAYER_TYPE
+              type: string
+              description: "Payer organization type (e.g. Commercial, Medicare, Managed Medicaid)"
+            - name: CUST_NUMBER_PAYER
+              type: string
+              description: "Customer/Payer account number"
+            - name: CUST_NUMBER_PAYER_COT
+              type: string
+              description: "Class of Trade (COT) for the Payer"
+            - name: CUSTOMER_NUMBER
+              type: string
+              description: "Beneficiary customer identifier"
+            - name: CUSTOMER_COT
+              type: string
+              description: "Class of Trade for the customer"
+            - name: CONTRACT
+              type: string
+              description: "Contract agreement name or reference"
+            - name: CONTRACT_NUMBER
+              type: string
+              description: "Contract reference number"
+            - name: CONTRACT_OWNER_NUMBER
+              type: string
+              description: "Contract owner account number"
+            - name: CONTRACT_OWNER_COT
+              type: string
+              description: "Class of Trade of the contract owner"
+            - name: UNITS_PER_PACKAGE_SIZE
+              type: decimal
+              description: "Dosage units contained in package"
+            - name: DIVISION_CD
+              type: string
+              description: "Corporate division code"
+            - name: LINKING_KEY
+              type: string
+              description: "Cross-system linkage key"
+            - name: DUE_DATE
+              type: date
+              description: "Payment due date"
+            - name: STRATEGY_ID
+              type: string
+              description: "Commercial pricing strategy identifier"
+            - name: EARNED_QTR
+              type: string
+              description: "Quarter in which rebate was earned (e.g. 2024Q1)"
+            - name: PAID_QTR
+              type: string
+              description: "Quarter in which rebate was paid (e.g. 2024Q2)"
+            - name: BILLING_DOC_NO
+              type: string
+              description: "Billing document number"
+            - name: MAIL_ORDER
+              type: string
+              description: "Mail order channel indicator ('Y'/'N')"
+            - name: SALES_CONTRACT
+              type: string
+              description: "Sales contract identifier"
+            - name: REBATE_TYPE
+              type: string
+              description: "Rebate classification type (e.g. Formulary, Volume, Access)"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code (e.g. US)"
+            - name: REBATE_BILLING_DATE
+              type: date
+              description: "Date of rebate billing"
+            - name: BILLING_DOC_TYPE
+              type: string
+              description: "Billing document type"
+            - name: REBATE_RECIPIENT_NUMBER
+              type: string
+              description: "Account number of the rebate recipient"
+            - name: REBATE_RECIPIENT_COT
+              type: string
+              description: "Class of Trade of the rebate recipient"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract classification type"
+            - name: REBATE_DISC_TYPE
+              type: string
+              description: "Rebate discount type classification"
+            - name: flag
+              type: string
+              description: "Processing status flag"
+
+        # =====================================================
+        # TABLE 5: gp_nm_policy_filter
+        # =====================================================
+        - name: gp_nm_policy_filter
+          description: >
+            Policy filtering governance rules for Government Pricing Non-Medicaid calculations.
+            Defines price types, rule conditions, filter values, and status for inclusion/exclusion logic.
+          columns:
+            - name: Policy_id
+              type: primary_key
+              description: "Unique policy filter identifier"
+            - name: Policy_Name
+              type: string
+              description: "Descriptive name of the government pricing policy"
+            - name: Policy_Desc
+              type: string
+              description: "Detailed description of the policy rule and business justification"
+            - name: Price_Type
+              type: string
+              description: "Target government price type (e.g. Non-Medicaid AMP, Best Price, WAC)"
+            - name: Status
+              type: string
+              description: "Policy operational status ('Active'/'Inactive')"
+            - name: Rule_Name
+              type: string
+              description: "Name of the filtering rule or criteria"
+            - name: Condition
+              type: string
+              description: "Evaluation condition operator (e.g. '=', '!=', 'IN', 'NOT IN', '>')' "
+            - name: Rule_Value
+              type: string
+              description: "Filter threshold, criteria, or target value"
+            - name: Code
+              type: string
+              description: "Classification code linking to component or pricing category"
+
+        # =====================================================
+        # TABLE 6: gp_nm_direct_sale_tgt
+        # =====================================================
+        - name: gp_nm_direct_sale_tgt
+          description: >
+            Target/processed direct sales transactions post-policy filtering for Government Pricing Non-Medicaid calculations.
+            Mirrors gp_nm_direct_sale schema with validated transaction amounts, WAC, PP discounts, and customer details.
+          columns:
+            - name: TRANSACTION_ID
+              type: integer
+              description: "Direct sale transaction identifier"
+            - name: SOURCE_ID
+              type: integer
+              description: "Source feed / billing system identifier"
+            - name: CREATE_DATE
+              type: date
+              description: "Target record creation date"
+            - name: SALES_KEY
+              type: string
+              description: "Business sales transaction reference key"
+            - name: NDC11
+              type: bigint
+              description: "11-digit National Drug Code package identifier"
+            - name: NDC9
+              type: bigint
+              description: "9-digit National Drug Code identifier"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Pharmaceutical product brand name / description"
+            - name: PROD_SIZE
+              type: integer
+              description: "Package size unit count"
+            - name: BILLING_DOC_TYPE
+              type: string
+              description: "Billing document type code"
+            - name: ORDER_TYPE
+              type: string
+              description: "Sales order type classification"
+            - name: ORDER_REASON_CODE
+              type: string
+              description: "Order reason code"
+            - name: PAYMENT_TERMS
+              type: string
+              description: "Payment terms"
+            - name: INVOICE_NUMBER
+              type: bigint
+              description: "Commercial invoice number"
+            - name: INVOICE_LINE_NUMBER
+              type: integer
+              description: "Invoice line item number"
+            - name: INVOICE_DATE
+              type: date
+              description: "Invoice date"
+            - name: EARNED_DATE
+              type: date
+              description: "Revenue earned date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Gross invoice sales amount"
+            - name: INVOICE_QUANTITY
+              type: decimal
+              description: "Invoiced package quantity"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Invoiced total dosage unit quantity"
+            - name: PACKAGE_PRICE
+              type: decimal
+              description: "Invoiced price per package"
+            - name: MEDI_UNIT_PRICE
+              type: decimal
+              description: "Medical unit price"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "WAC price per package"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "WAC price per dosage unit"
+            - name: PP_DISCOUNT_PCT
+              type: integer
+              description: "Prompt Pay discount percentage"
+            - name: PP_DISCOUNT_AMOUNT
+              type: decimal
+              description: "Prompt Pay discount amount"
+            - name: PP_DISCOUNT_AMOUNT_UNIT
+              type: decimal
+              description: "Prompt Pay discount amount per unit"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net realized price per package"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net realized price per unit"
+            - name: AMOUNT_NET_EXTENDED
+              type: decimal
+              description: "Extended net sales amount"
+            - name: AMOUNT_WAC_EXTENDED
+              type: decimal
+              description: "Extended WAC amount"
+            - name: CUST_NUMBER_SHIPTO
+              type: bigint
+              description: "Ship-To customer account number"
+            - name: CUST_NUMBER_SHIPTO_COT
+              type: string
+              description: "Ship-To customer Class of Trade"
+            - name: CUST_NUMBER_SHIPTO_NAME
+              type: bigint
+              description: "Ship-To customer name identifier"
+            - name: CUST_NUMBER_SOLDTO
+              type: bigint
+              description: "Sold-To customer account number"
+            - name: CUST_NUMBER_SOLDTO_COT
+              type: string
+              description: "Sold-To customer Class of Trade"
+            - name: CUST_NUMBER_SOLDTO_NAME
+              type: bigint
+              description: "Sold-To customer name identifier"
+            - name: DIVISION_CD
+              type: string
+              description: "Division code"
+            - name: INVOICE_AMOUNT_MINUS_PP
+              type: decimal
+              description: "Invoice amount after prompt pay discount deduction"
+            - name: OI_DISCOUNT_AMOUNT
+              type: decimal
+              description: "Order incentive discount amount"
+            - name: OI_DISCOUNT_AMOUNT_UNIT
+              type: decimal
+              description: "Order incentive discount amount per unit"
+            - name: NET_PRICE_PKG_PP
+              type: decimal
+              description: "Net price per package post Prompt Pay"
+            - name: NET_PRICE_UNIT_PP
+              type: decimal
+              description: "Net price per unit post Prompt Pay"
+            - name: CONTRACT
+              type: string
+              description: "Contract identifier"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract classification type"
+            - name: flag
+              type: string
+              description: "Target record status flag"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code"
+
+        # =====================================================
+        # TABLE 7: gp_nm_inelig_sale_tgt
+        # =====================================================
+        - name: gp_nm_inelig_sale_tgt
+          description: >
+            Target/processed ineligible sales transactions post-policy filtering for Government Pricing Non-Medicaid calculations.
+            Tracks validated chargeback claims, contract prices, wholesaler sold-to/ship-to, customer accounts, and FSS/PHS eligibility.
+          columns:
+            - name: TRANSACTION_ID
+              type: integer
+              description: "Ineligible sale transaction identifier"
+            - name: SOURCE_ID
+              type: integer
+              description: "Source feed identifier"
+            - name: CREATE_DATE
+              type: date
+              description: "Target creation date"
+            - name: CHARGEBACK_KEY
+              type: string
+              description: "Wholesaler chargeback reference key"
+            - name: NDC11
+              type: string
+              description: "11-digit National Drug Code identifier"
+            - name: NDC9
+              type: string
+              description: "9-digit National Drug Code identifier"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Product brand name / description"
+            - name: PROD_SIZE
+              type: integer
+              description: "Package unit size"
+            - name: BILLING_TYPE
+              type: string
+              description: "Billing type classification"
+            - name: ORDER_TYPE
+              type: string
+              description: "Order type classification"
+            - name: ORDER_REASON_CODE
+              type: string
+              description: "Chargeback order reason code"
+            - name: ITEM_CATEGORY
+              type: string
+              description: "Item category code"
+            - name: BILLING_DOCUMENT
+              type: string
+              description: "Billing document number"
+            - name: INVOICE_DATE
+              type: date
+              description: "Invoice transaction date"
+            - name: SETTLEMENT_DATE
+              type: date
+              description: "Chargeback settlement date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Invoice amount for chargeback line"
+            - name: INVOICE_QUANTITY
+              type: decimal
+              description: "Package quantity"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Dosage unit quantity"
+            - name: CONTRACT_PRICE_PKG
+              type: decimal
+              description: "Contracted price per package"
+            - name: CONTRACT_PRICE_UNIT
+              type: decimal
+              description: "Contracted price per unit"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "WAC price per package at settlement"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "WAC price per unit"
+            - name: CHARGEBACK_AMOUNT
+              type: decimal
+              description: "Chargeback reimbursement amount"
+            - name: CHARGEBACK_AMOUNT_UNIT
+              type: decimal
+              description: "Chargeback amount per unit"
+            - name: EXTENDED_WAC_AMOUNT
+              type: decimal
+              description: "Total extended WAC valuation"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net price per package"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net price per unit"
+            - name: BASIS_PRICE_PKG
+              type: decimal
+              description: "Basis price per package"
+            - name: BASIS_PRICE_UNIT
+              type: decimal
+              description: "Basis price per unit"
+            - name: EXTENDED_BASIS_AMOUNT
+              type: decimal
+              description: "Extended total basis amount"
+            - name: CONTRACT
+              type: string
+              description: "Pricing contract identifier"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract classification type"
+            - name: WHOLESALER_SOLDTO
+              type: string
+              description: "Wholesaler Sold-To account"
+            - name: WHOLESALER_SOLDTO_COT
+              type: string
+              description: "Wholesaler Sold-To Class of Trade"
+            - name: WHOLESALER_SHIPTO
+              type: string
+              description: "Wholesaler Ship-To account"
+            - name: WHOLESALER_SHIPTO_COT
+              type: string
+              description: "Wholesaler Ship-To Class of Trade"
+            - name: CUSTOMER_SOLDTO_SOURCE_ID
+              type: string
+              description: "Customer Sold-To identifier"
+            - name: CUSTOMER_SOLDTO_COT
+              type: string
+              description: "Customer Sold-To Class of Trade"
+            - name: CUSTOMER_SHIPTO_SOURCE_ID
+              type: string
+              description: "Customer Ship-To identifier"
+            - name: CUSTOMER_SHIPTO_COT
+              type: string
+              description: "Customer Ship-To Class of Trade"
+            - name: DIVISION_CD
+              type: string
+              description: "Division code"
+            - name: FSS_ELIG_IND
+              type: string
+              description: "FSS eligibility indicator ('Y'/'N')"
+            - name: PHS_ELIG_IND
+              type: string
+              description: "PHS 340B eligibility indicator ('Y'/'N')"
+            - name: PHS_CP_IND
+              type: string
+              description: "PHS covered entity price indicator"
+            - name: CALC_CONTRACT_PRICE
+              type: decimal
+              description: "Calculated contract price"
+            - name: PHS_COMMERCIAL
+              type: string
+              description: "PHS commercial classification"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code"
+            - name: flag
+              type: string
+              description: "Target record status flag"
+
+        # =====================================================
+        # TABLE 8: gp_nm_inelig_sale_cbk_tgt
+        # =====================================================
+        - name: gp_nm_inelig_sale_cbk_tgt
+          description: >
+            Target/processed chargeback (cbk) transactions for Government Pricing Non-Medicaid calculations.
+            Captures final adjudicated chargeback lines, contract prices, wholesaler details, and statutory eligibility indicators.
+          columns:
+            - name: TRANSACTION_ID
+              type: integer
+              description: "Chargeback transaction identifier"
+            - name: SOURCE_ID
+              type: integer
+              description: "Source feed identifier"
+            - name: CREATE_DATE
+              type: date
+              description: "Target creation date"
+            - name: CHARGEBACK_KEY
+              type: string
+              description: "Chargeback reference key"
+            - name: NDC11
+              type: string
+              description: "11-digit National Drug Code identifier"
+            - name: NDC9
+              type: string
+              description: "9-digit National Drug Code identifier"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Product brand name / description"
+            - name: PROD_SIZE
+              type: integer
+              description: "Package unit size"
+            - name: BILLING_TYPE
+              type: string
+              description: "Billing type classification"
+            - name: ORDER_TYPE
+              type: string
+              description: "Order type classification"
+            - name: ORDER_REASON_CODE
+              type: string
+              description: "Chargeback order reason code"
+            - name: ITEM_CATEGORY
+              type: string
+              description: "Item category code"
+            - name: BILLING_DOCUMENT
+              type: string
+              description: "Billing document number"
+            - name: INVOICE_DATE
+              type: date
+              description: "Invoice transaction date"
+            - name: SETTLEMENT_DATE
+              type: date
+              description: "Chargeback settlement date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Invoice amount for chargeback line"
+            - name: INVOICE_QUANTITY
+              type: decimal
+              description: "Package quantity"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Dosage unit quantity"
+            - name: CONTRACT_PRICE_PKG
+              type: decimal
+              description: "Contracted price per package"
+            - name: CONTRACT_PRICE_UNIT
+              type: decimal
+              description: "Contracted price per unit"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "WAC price per package at settlement"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "WAC price per unit"
+            - name: CHARGEBACK_AMOUNT
+              type: decimal
+              description: "Chargeback reimbursement amount"
+            - name: CHARGEBACK_AMOUNT_UNIT
+              type: decimal
+              description: "Chargeback amount per unit"
+            - name: EXTENDED_WAC_AMOUNT
+              type: decimal
+              description: "Total extended WAC valuation"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net price per package"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net price per unit"
+            - name: BASIS_PRICE_PKG
+              type: decimal
+              description: "Basis price per package"
+            - name: BASIS_PRICE_UNIT
+              type: decimal
+              description: "Basis price per unit"
+            - name: EXTENDED_BASIS_AMOUNT
+              type: decimal
+              description: "Extended total basis amount"
+            - name: CONTRACT
+              type: string
+              description: "Pricing contract identifier"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract classification type"
+            - name: WHOLESALER_SOLDTO
+              type: string
+              description: "Wholesaler Sold-To account"
+            - name: WHOLESALER_SOLDTO_COT
+              type: string
+              description: "Wholesaler Sold-To Class of Trade"
+            - name: WHOLESALER_SHIPTO
+              type: string
+              description: "Wholesaler Ship-To account"
+            - name: WHOLESALER_SHIPTO_COT
+              type: string
+              description: "Wholesaler Ship-To Class of Trade"
+            - name: CUSTOMER_SOLDTO_SOURCE_ID
+              type: string
+              description: "Customer Sold-To identifier"
+            - name: CUSTOMER_SOLDTO_COT
+              type: string
+              description: "Customer Sold-To Class of Trade"
+            - name: CUSTOMER_SHIPTO_SOURCE_ID
+              type: string
+              description: "Customer Ship-To identifier"
+            - name: CUSTOMER_SHIPTO_COT
+              type: string
+              description: "Customer Ship-To Class of Trade"
+            - name: DIVISION_CD
+              type: string
+              description: "Division code"
+            - name: FSS_ELIG_IND
+              type: string
+              description: "FSS eligibility indicator ('Y'/'N')"
+            - name: PHS_ELIG_IND
+              type: string
+              description: "PHS 340B eligibility indicator ('Y'/'N')"
+            - name: PHS_CP_IND
+              type: string
+              description: "PHS covered entity price indicator"
+            - name: CALC_CONTRACT_PRICE
+              type: decimal
+              description: "Calculated contract price"
+            - name: PHS_COMMERCIAL
+              type: string
+              description: "PHS commercial classification"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code"
+            - name: flag
+              type: string
+              description: "Target record status flag"
+
+        # =====================================================
+        # TABLE 9: gp_nm_elig_rebates_sale_tgt
+        # =====================================================
+        - name: gp_nm_elig_rebates_sale_tgt
+          description: >
+            Target/eligible rebate sales transactions that qualify for Government Pricing Non-Medicaid calculations.
+            Contains post-policy filtered eligible rebates, tier percentages, fee amounts, payer types, contract numbers, and quarterly periods.
+          columns:
+            - name: TRANSACTION_ID
+              type: primary_key
+              description: "Unique eligible rebate transaction identifier (AUTO_INCREMENT)"
+            - name: SOURCE_ID
+              type: string
+              description: "Source system identifier"
+            - name: CREATE_DATE
+              type: datetime
+              description: "Creation timestamp"
+            - name: REBATE_FEE_KEY
+              type: string
+              description: "Rebate fee reference key"
+            - name: NDC11
+              type: string
+              description: "11-digit National Drug Code"
+            - name: NDC9
+              type: string
+              description: "9-digit National Drug Code"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Product brand name / description"
+            - name: MEDI_UNITS_PER_PKG
+              type: decimal
+              description: "Medical units per package"
+            - name: ORDER_TYPE
+              type: string
+              description: "Order classification type"
+            - name: INVOICE_TYPE
+              type: string
+              description: "Invoice classification type"
+            - name: BILLING_DOCUMENT
+              type: string
+              description: "Billing document reference number"
+            - name: BILLING_DOC_ITEM
+              type: string
+              description: "Billing document line item"
+            - name: INVOICE_DATE
+              type: date
+              description: "Invoice date"
+            - name: SETTLEMENT_DATE
+              type: date
+              description: "Rebate settlement date"
+            - name: PERIOD_START_DATE
+              type: date
+              description: "Reporting period start date"
+            - name: PERIOD_END_DATE
+              type: date
+              description: "Reporting period end date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Invoiced gross amount"
+            - name: INVOICE_PKG_QTY
+              type: decimal
+              description: "Invoiced package quantity"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Invoiced unit quantity"
+            - name: UNIT_TYPE
+              type: string
+              description: "Unit measurement type"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "WAC price per package"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "WAC price per unit"
+            - name: REBATE_TIER_PERCENT
+              type: decimal
+              description: "Rebate tier percentage"
+            - name: REBATE_FEE_AMOUNT
+              type: decimal
+              description: "Eligible rebate fee amount"
+            - name: REBATE_FEE_AMOUNT_UNIT
+              type: decimal
+              description: "Rebate fee amount per unit"
+            - name: REBATE_FEE_IND
+              type: string
+              description: "Rebate fee indicator"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net price per package"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net price per unit"
+            - name: BASIS_PRICE_PKG
+              type: decimal
+              description: "Basis price per package"
+            - name: BASIS_PRICE_UNIT
+              type: decimal
+              description: "Basis price per unit"
+            - name: EXTENDED_WAC_AMOUNT
+              type: decimal
+              description: "Extended WAC amount"
+            - name: PAYER_TYPE
+              type: string
+              description: "Payer organization type (e.g. Commercial, Medicare, Managed Medicaid)"
+            - name: CUST_NUMBER_PAYER
+              type: string
+              description: "Payer customer account number"
+            - name: CUST_NUMBER_PAYER_COT
+              type: string
+              description: "Payer Class of Trade"
+            - name: CUSTOMER_NUMBER
+              type: string
+              description: "Customer number"
+            - name: CUSTOMER_COT
+              type: string
+              description: "Customer Class of Trade"
+            - name: CONTRACT
+              type: string
+              description: "Contract agreement name or reference"
+            - name: CONTRACT_NUMBER
+              type: string
+              description: "Contract number"
+            - name: CONTRACT_OWNER_NUMBER
+              type: string
+              description: "Contract owner account number"
+            - name: CONTRACT_OWNER_COT
+              type: string
+              description: "Contract owner Class of Trade"
+            - name: UNITS_PER_PACKAGE_SIZE
+              type: decimal
+              description: "Package size unit count"
+            - name: DIVISION_CD
+              type: string
+              description: "Division code"
+            - name: LINKING_KEY
+              type: string
+              description: "Cross-system linkage key"
+            - name: DUE_DATE
+              type: date
+              description: "Due date"
+            - name: STRATEGY_ID
+              type: string
+              description: "Pricing strategy identifier"
+            - name: EARNED_QTR
+              type: string
+              description: "Earned quarter (e.g. 2024Q1)"
+            - name: PAID_QTR
+              type: string
+              description: "Paid quarter (e.g. 2024Q2)"
+            - name: BILLING_DOC_NO
+              type: string
+              description: "Billing document number"
+            - name: MAIL_ORDER
+              type: string
+              description: "Mail order indicator ('Y'/'N')"
+            - name: SALES_CONTRACT
+              type: string
+              description: "Sales contract identifier"
+            - name: REBATE_TYPE
+              type: string
+              description: "Rebate classification type (e.g. Formulary, Volume, Access)"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code (e.g. US)"
+            - name: REBATE_BILLING_DATE
+              type: date
+              description: "Rebate billing date"
+            - name: BILLING_DOC_TYPE
+              type: string
+              description: "Billing document type"
+            - name: REBATE_RECIPIENT_NUMBER
+              type: string
+              description: "Rebate recipient account number"
+            - name: REBATE_RECIPIENT_COT
+              type: string
+              description: "Rebate recipient Class of Trade"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract type classification"
+            - name: REBATE_DISC_TYPE
+              type: string
+              description: "Rebate discount type"
+            - name: flag
+              type: string
+              description: "Processing status flag"
+
+        # =====================================================
+        # TABLE 10: gp_nm_inelig_rebates_sale_tgt
+        # =====================================================
+        - name: gp_nm_inelig_rebates_sale_tgt
+          description: >
+            Target/ineligible rebate sales transactions post-policy filtering for Government Pricing Non-Medicaid calculations.
+            Tracks excluded rebate lines, rebate tier percentages, fee amounts, payer types, contract numbers, and quarterly periods.
+          columns:
+            - name: TRANSACTION_ID
+              type: primary_key
+              description: "Unique ineligible rebate transaction identifier (AUTO_INCREMENT)"
+            - name: SOURCE_ID
+              type: string
+              description: "Source system identifier"
+            - name: CREATE_DATE
+              type: datetime
+              description: "Creation timestamp"
+            - name: REBATE_FEE_KEY
+              type: string
+              description: "Rebate fee reference key"
+            - name: NDC11
+              type: string
+              description: "11-digit National Drug Code"
+            - name: NDC9
+              type: string
+              description: "9-digit National Drug Code"
+            - name: PRODUCT_DESC
+              type: string
+              description: "Product brand name / description"
+            - name: MEDI_UNITS_PER_PKG
+              type: decimal
+              description: "Medical units per package"
+            - name: ORDER_TYPE
+              type: string
+              description: "Order classification type"
+            - name: INVOICE_TYPE
+              type: string
+              description: "Invoice classification type"
+            - name: BILLING_DOCUMENT
+              type: string
+              description: "Billing document reference number"
+            - name: BILLING_DOC_ITEM
+              type: string
+              description: "Billing document line item"
+            - name: INVOICE_DATE
+              type: date
+              description: "Invoice date"
+            - name: SETTLEMENT_DATE
+              type: date
+              description: "Rebate settlement date"
+            - name: PERIOD_START_DATE
+              type: date
+              description: "Reporting period start date"
+            - name: PERIOD_END_DATE
+              type: date
+              description: "Reporting period end date"
+            - name: INVOICE_AMOUNT
+              type: decimal
+              description: "Invoiced gross amount"
+            - name: INVOICE_PKG_QTY
+              type: decimal
+              description: "Invoiced package quantity"
+            - name: INVOICE_UNIT_QTY
+              type: decimal
+              description: "Invoiced unit quantity"
+            - name: UNIT_TYPE
+              type: string
+              description: "Unit measurement type"
+            - name: WAC_PRICE_PKG
+              type: decimal
+              description: "WAC price per package"
+            - name: WAC_PRICE_UNIT
+              type: decimal
+              description: "WAC price per unit"
+            - name: REBATE_TIER_PERCENT
+              type: decimal
+              description: "Rebate tier percentage"
+            - name: REBATE_FEE_AMOUNT
+              type: decimal
+              description: "Ineligible rebate fee amount"
+            - name: REBATE_FEE_AMOUNT_UNIT
+              type: decimal
+              description: "Rebate fee amount per unit"
+            - name: REBATE_FEE_IND
+              type: string
+              description: "Rebate fee indicator"
+            - name: NET_PRICE_PKG
+              type: decimal
+              description: "Net price per package"
+            - name: NET_PRICE_UNIT
+              type: decimal
+              description: "Net price per unit"
+            - name: BASIS_PRICE_PKG
+              type: decimal
+              description: "Basis price per package"
+            - name: BASIS_PRICE_UNIT
+              type: decimal
+              description: "Basis price per unit"
+            - name: EXTENDED_WAC_AMOUNT
+              type: decimal
+              description: "Extended WAC amount"
+            - name: PAYER_TYPE
+              type: string
+              description: "Payer organization type (e.g. Commercial, Medicare, Managed Medicaid)"
+            - name: CUST_NUMBER_PAYER
+              type: string
+              description: "Payer customer account number"
+            - name: CUST_NUMBER_PAYER_COT
+              type: string
+              description: "Payer Class of Trade"
+            - name: CUSTOMER_NUMBER
+              type: string
+              description: "Customer number"
+            - name: CUSTOMER_COT
+              type: string
+              description: "Customer Class of Trade"
+            - name: CONTRACT
+              type: string
+              description: "Contract agreement name or reference"
+            - name: CONTRACT_NUMBER
+              type: string
+              description: "Contract number"
+            - name: CONTRACT_OWNER_NUMBER
+              type: string
+              description: "Contract owner account number"
+            - name: CONTRACT_OWNER_COT
+              type: string
+              description: "Contract owner Class of Trade"
+            - name: UNITS_PER_PACKAGE_SIZE
+              type: decimal
+              description: "Package size unit count"
+            - name: DIVISION_CD
+              type: string
+              description: "Division code"
+            - name: LINKING_KEY
+              type: string
+              description: "Cross-system linkage key"
+            - name: DUE_DATE
+              type: date
+              description: "Due date"
+            - name: STRATEGY_ID
+              type: string
+              description: "Pricing strategy identifier"
+            - name: EARNED_QTR
+              type: string
+              description: "Earned quarter (e.g. 2024Q1)"
+            - name: PAID_QTR
+              type: string
+              description: "Paid quarter (e.g. 2024Q2)"
+            - name: BILLING_DOC_NO
+              type: string
+              description: "Billing document number"
+            - name: MAIL_ORDER
+              type: string
+              description: "Mail order indicator ('Y'/'N')"
+            - name: SALES_CONTRACT
+              type: string
+              description: "Sales contract identifier"
+            - name: REBATE_TYPE
+              type: string
+              description: "Rebate classification type (e.g. Formulary, Volume, Access)"
+            - name: COUNTRY_CODE
+              type: string
+              description: "ISO country code (e.g. US)"
+            - name: REBATE_BILLING_DATE
+              type: date
+              description: "Rebate billing date"
+            - name: BILLING_DOC_TYPE
+              type: string
+              description: "Billing document type"
+            - name: REBATE_RECIPIENT_NUMBER
+              type: string
+              description: "Rebate recipient account number"
+            - name: REBATE_RECIPIENT_COT
+              type: string
+              description: "Rebate recipient Class of Trade"
+            - name: CONTRACT_TYPE
+              type: string
+              description: "Contract type classification"
+            - name: REBATE_DISC_TYPE
+              type: string
+              description: "Rebate discount type"
+            - name: flag
+              type: string
+              description: "Processing status flag"
+
+        # =====================================================
+        # TABLE 11: gp_nm_direct_sale_gp_calc
+        # =====================================================
+        - name: gp_nm_direct_sale_gp_calc
+          description: >
+            Government Pricing (GP) Non-Medicaid calculation results table.
+            Captures calculated total units, total amounts, Average Manufacturer Price (AMP),
+            and period dimensions (year, month, quarter) by product and NDC11.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique calculation record identifier (AUTO_INCREMENT)"
+            - name: item_id
+              type: integer
+              description: "Line item reference identifier"
+            - name: ndc11
+              type: string
+              description: "11-digit National Drug Code identifier"
+            - name: product_name
+              type: string
+              description: "Pharmaceutical product brand name"
+            - name: component
+              type: string
+              description: "Government pricing calculation component name"
+            - name: total_unit
+              type: decimal
+              description: "Total calculated units for the period"
+            - name: total_amount
+              type: decimal
+              description: "Total calculated sales amount for the period"
+            - name: amp
+              type: decimal
+              description: "Average Manufacturer Price (AMP) calculated per unit"
+            - name: invoice_year
+              type: string
+              description: "Invoice reporting year (e.g. '2024')"
+            - name: invoice_month
+              type: string
+              description: "Invoice reporting month (e.g. '01', 'January')"
+            - name: invoice_quarterly
+              type: string
+              description: "Invoice reporting quarter (e.g. 'Q1', '2024Q1')"
+
+        # =====================================================
+        # TABLE 12: gp_nm_direct_sale_gp_calc_src
+        # =====================================================
+        - name: gp_nm_direct_sale_gp_calc_src
+          description: >
+            Source baseline dataset for Government Pricing Non-Medicaid calculations.
+            Provides baseline total units and amounts by NDC11 and reporting period before calculation adjustments.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique source baseline record identifier"
+            - name: item_id
+              type: integer
+              description: "Line item reference identifier"
+            - name: ndc11
+              type: string
+              description: "11-digit National Drug Code identifier"
+            - name: total_unit
+              type: decimal
+              description: "Baseline source total units"
+            - name: total_amount
+              type: decimal
+              description: "Baseline source total amount"
+            - name: invoice_year
+              type: string
+              description: "Invoice reporting year"
+            - name: invoice_month
+              type: string
+              description: "Invoice reporting month"
+            - name: invoice_quarterly
+              type: string
+              description: "Invoice reporting quarter"
+
+        # =====================================================
+        # TABLE 13: gp_comparison_results
+        # =====================================================
+        - name: gp_comparison_results
+          description: >
+            Reconciliation comparison results between calculated GP values (gp_nm_direct_sale_gp_calc)
+            and baseline source values (gp_nm_direct_sale_gp_calc_src).
+            Tracks unit differences, amount differences, and match/variance statuses.
+          columns:
+            - name: item_id
+              type: integer
+              description: "Line item identifier being compared"
+            - name: ndc11
+              type: string
+              description: "11-digit National Drug Code"
+            - name: product_name
+              type: string
+              description: "Pharmaceutical product name"
+            - name: component
+              type: string
+              description: "Calculation component being evaluated"
+            - name: gp_nm_direct_sale_gp_calc_total_unit
+              type: integer
+              description: "Calculated total units from gp_nm_direct_sale_gp_calc"
+            - name: gp_nm_direct_sale_gp_calc_total_amount
+              type: decimal
+              description: "Calculated total amount from gp_nm_direct_sale_gp_calc"
+            - name: gp_nm_direct_sale_gp_calc_src_total_unit
+              type: integer
+              description: "Baseline source total units from gp_nm_direct_sale_gp_calc_src"
+            - name: gp_nm_direct_sale_gp_calc_src_total_amount
+              type: decimal
+              description: "Baseline source total amount from gp_nm_direct_sale_gp_calc_src"
+            - name: unit_difference
+              type: integer
+              description: "Variance in units (Calculated Units - Source Units)"
+            - name: amount_difference
+              type: decimal
+              description: "Variance in currency amount (Calculated Amount - Source Amount)"
+            - name: status
+              type: string
+              description: "Comparison status indicator (e.g. 'MATCH', 'DIFF', 'ERROR')"
+            - name: invoice_year
+              type: string
+              description: "Reporting year"
+            - name: invoice_month
+              type: string
+              description: "Reporting month"
+            - name: invoice_quarterly
+              type: string
+              description: "Reporting quarter"
+
+        # =====================================================
+        # TABLE 14: gp_logs
+        # =====================================================
+        - name: gp_logs
+          description: >
+            Audit execution log for PriceAssure file uploads and government pricing data processing runs.
+            Records file names, uploading users, upload timestamps, price types, and pipeline statuses.
+          columns:
+            - name: id
+              type: primary_key
+              description: "Unique log entry identifier (AUTO_INCREMENT)"
+            - name: file_name
+              type: string
+              description: "Name of the uploaded input data file"
+            - name: uploaded_by
+              type: string
+              description: "User account or service identity that performed the upload"
+            - name: uploaded_date
+              type: datetime
+              description: "Timestamp when the file was uploaded"
+            - name: price_type
+              type: string
+              description: "Government pricing price type classification"
+            - name: status
+              type: string
+              description: "Processing pipeline execution status (e.g. 'Success', 'Failed', 'In-Progress')"

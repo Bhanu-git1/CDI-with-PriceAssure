@@ -144,6 +144,36 @@ def test_gpo_prompts_route_to_gpo(router, prompt):
     )
 
 
+# --- PriceAssure routing ---------------------------------------------------
+
+PRICEASSURE_PROMPTS = [
+    "Show direct sales revenue grouped by product",
+    "List all chargebacks by wholesaler",
+    "Show prompt pay discount percentage for each product",
+    "What is the total chargeback amount for ineligible sales?",
+    "Show gp non-medicaid configuration components from gp_nm_config",
+    "Which products have smoothing required or proration required?",
+    "Compare package wac price and net price",
+    "Show ineligible sales with FSS elig and PHS elig",
+    "Show direct sales transactions from gp_nm_direct_sale",
+    "Show chargebacks from gp_nm_inelig_sale",
+    "Show total customer rebate fees grouped by payer type",
+    "List all active policy filter rules from gp_nm_policy_filter",
+    "Show eligible rebate sales from gp_nm_elig_rebates_sale_tgt",
+    "Show post-policy filtered direct sales from gp_nm_direct_sale_tgt",
+    "Show calculation discrepancies from gp_comparison_results",
+    "Show AMP calculations from gp_nm_direct_sale_gp_calc",
+]
+
+
+@pytest.mark.parametrize("prompt", PRICEASSURE_PROMPTS)
+def test_priceassure_prompts_route_to_priceassure(router, prompt):
+    decision = route_sync(router, prompt)
+    assert decision.source_id == "mysql_priceassure", (
+        f"{prompt!r}: got {decision.source_id} (stage={decision.stage}, scores={decision.scores})"
+    )
+
+
 # --- explicit override ----------------------------------------------------
 
 def test_ui_selection_wins_over_keywords(router):
@@ -163,6 +193,10 @@ def test_unknown_requested_source_falls_back_to_routing(router):
     ("from salesforce, list everything", "salesforce"),
     ("using database 2, show me the tables", "mysql_gpo"),
     ("show me the tables in db1", "mysql_primary"),
+    ("in priceassure, show me the tables", "mysql_priceassure"),
+    ("from price assure, show direct sales", "mysql_priceassure"),
+    ("using database 4, list the records", "mysql_priceassure"),
+    ("show direct sales in db4", "mysql_priceassure"),
 ])
 def test_in_prompt_directives(router, prompt, expected):
     decision = route_sync(router, prompt)

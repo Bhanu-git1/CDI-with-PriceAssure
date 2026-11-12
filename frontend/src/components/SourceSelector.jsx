@@ -30,6 +30,8 @@ const BADGE_ICON = {
   mysql: '🗄️',
   gpo: '📋',
   salesforce: <SalesforceLogo />,
+  priceassure: '💲',
+  datasure: '🔄',
 };
 
 export function sourceIcon(badge) {

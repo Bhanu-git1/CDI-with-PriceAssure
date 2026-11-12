@@ -532,6 +532,137 @@ sources:
         - reconciliation
         - mismatch
         - missingdata
+  # ===================================================================
+  # DB 4 — PriceAssure Database
+  # ===================================================================
+  - id: mysql_priceassure
+    label: "PriceAssure Database"
+    short_label: "PriceAssure"
+    kind: mysql
+    enabled: true
+    priority: 10
+    badge: "priceassure"
+    aliases:
+      - "priceassure"
+      - "price_assure"
+      - "price assure"
+      - "price assure db"
+      - "priceassure db"
+      - "database 4"
+      - "db4"
+      - "db 4"
+    connection:
+      host_env: PriceAssure_MYSQL_HOST
+      port_env: PriceAssure_MYSQL_PORT
+      user_env: PriceAssure_MYSQL_USER
+      password_env: PriceAssure_MYSQL_PASSWORD
+      database_env: PriceAssure_MYSQL_DATABASE
+      pool_name: dce_pool_priceassure
+      read_only: true
+    semantic:
+      model_file: Price_assure.yaml
+      style: semantic_model
+      trim_strategy: budgeted
+      max_chars: 6000
+      max_cols_per_table: 50
+    sandbox_global: priceassure
+    dialect: mysql
+    exclude_tables:
+      - dce_chat_sessions
+      - dce_chat_messages
+    capabilities:
+      cross_table_search: true
+    routing:
+      domain: >
+        PriceAssure pharmaceutical pricing, government pricing (GP), non-Medicaid calculations,
+        direct sales invoices (source & target), ineligible sales, chargebacks, Wholesale Acquisition Cost (WAC),
+        Prompt Pay (PP) discounts, customer rebates (source & target), policy filtering rules,
+        wholesaler distributions, and FSS/PHS statutory pricing eligibility.
+      entities:
+        - gp_nm_config
+        - gp_nm_direct_sale
+        - gp_nm_inelig_sale
+        - gp_nm_rebates_sale
+        - gp_nm_policy_filter
+        - gp_nm_direct_sale_tgt
+        - gp_nm_inelig_sale_tgt
+        - gp_nm_inelig_sale_cbk_tgt
+        - gp_nm_elig_rebates_sale_tgt
+        - gp_nm_inelig_rebates_sale_tgt
+        - gp_nm_direct_sale_gp_calc
+        - gp_nm_direct_sale_gp_calc_src
+        - gp_comparison_results
+        - gp_logs
+      strong_keywords:
+        - priceassure
+        - price_assure
+        - price assure
+        - gp_nm_config
+        - gp_nm_direct_sale
+        - gp_nm_inelig_sale
+        - gp_nm_rebates_sale
+        - gp_nm_policy_filter
+        - gp_nm_direct_sale_tgt
+        - gp_nm_inelig_sale_tgt
+        - gp_nm_inelig_sale_cbk_tgt
+        - gp_nm_elig_rebates_sale_tgt
+        - gp_nm_inelig_rebates_sale_tgt
+        - gp_nm_direct_sale_gp_calc
+        - gp_nm_direct_sale_gp_calc_src
+        - gp_comparison_results
+        - gp_logs
+        - direct sale
+        - direct sales
+        - inelig sale
+        - ineligible sale
+        - ineligible sales
+        - chargeback
+        - chargebacks
+        - chargeback amount
+        - rebate
+        - rebates
+        - rebate fee
+        - rebate_fee_amount
+        - rebate tier
+        - rebate_tier_percent
+        - inelig_rebates
+        - policy filter
+        - policy_filter
+        - gp_calc
+        - gp calc
+        - amp
+        - average manufacturer price
+        - gp_comparison
+        - gp comparison
+        - pp discount
+        - prompt pay discount
+        - wac price
+        - wac_price_pkg
+        - wac_price_unit
+        - contract price
+        - contract_price_pkg
+        - basis price
+        - fss elig
+        - phs elig
+        - cust_number_shipto
+        - cust_number_soldto
+        - wholesaler_soldto
+        - wholesaler_shipto
+        - oi discount
+        - proration required
+        - smoothing required
+      weak_keywords:
+        - ndc
+        - ndc9
+        - ndc11
+        - invoice
+        - invoice amount
+        - invoice quantity
+        - billing doc type
+        - settlement date
+        - wholesaler
+        - soldto
+        - shipto
       exclude_keywords: []
 
 # =====================================================================

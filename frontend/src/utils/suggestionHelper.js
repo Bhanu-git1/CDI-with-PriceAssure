@@ -507,11 +507,111 @@ const SALESFORCE_CRM_SUGGESTIONS = [
   }
 ];
 
+const PRICEASSURE_SUGGESTIONS = [
+  {
+    id: 'pa_direct_sales_product',
+    title: 'Direct sales revenue by product',
+    icon: '💰',
+    query: 'Show direct sales revenue and package quantity grouped by product',
+    tags: ['direct sale', 'direct sales', 'product', 'revenue', 'invoice_amount', 'quantity', 'gp_nm_direct_sale'],
+    category: 'direct_sales'
+  },
+  {
+    id: 'pa_chargebacks_wholesaler',
+    title: 'Chargeback totals by wholesaler',
+    icon: '📊',
+    query: 'Show total chargeback amount grouped by wholesaler sold-to',
+    tags: ['chargeback', 'chargebacks', 'wholesaler', 'wholesaler_soldto', 'ineligible', 'gp_nm_inelig_sale'],
+    category: 'chargebacks'
+  },
+  {
+    id: 'pa_prompt_pay_discount',
+    title: 'Prompt Pay discounts summary',
+    icon: '🏷️',
+    query: 'Show total prompt pay discount amounts and average discount percentage by product',
+    tags: ['prompt pay', 'pp discount', 'discount', 'pp_discount_amount', 'pp_discount_pct', 'gp_nm_direct_sale'],
+    category: 'discounts'
+  },
+  {
+    id: 'pa_wac_vs_net_price',
+    title: 'WAC vs Net price comparison',
+    icon: '⚖️',
+    query: 'Compare average WAC package price with net package price across direct sales',
+    tags: ['wac', 'net price', 'wac_price_pkg', 'net_price_pkg', 'price comparison', 'gp_nm_direct_sale'],
+    category: 'pricing'
+  },
+  {
+    id: 'pa_phs_fss_eligibility',
+    title: 'Ineligible sales by FSS & PHS eligibility',
+    icon: '📋',
+    query: 'Show chargeback totals and invoice amounts grouped by FSS and PHS eligibility indicators',
+    tags: ['fss', 'phs', 'eligibility', '340b', 'fss_elig_ind', 'phs_elig_ind', 'gp_nm_inelig_sale'],
+    category: 'eligibility'
+  },
+  {
+    id: 'pa_gp_config_components',
+    title: 'GP Non-Medicaid calculation components',
+    icon: '⚙️',
+    query: 'List all government pricing components with smoothing and proration flags',
+    tags: ['gp_nm_config', 'config', 'smoothing', 'proration', 'component', 'required_flag'],
+    category: 'config'
+  },
+  {
+    id: 'pa_rebates_by_payer',
+    title: 'Customer rebate totals by payer type',
+    icon: '💳',
+    query: 'Show total rebate fee amounts and average rebate tier percentages grouped by payer type',
+    tags: ['rebate', 'rebates', 'rebate_fee_amount', 'rebate_tier_percent', 'payer_type', 'gp_nm_elig_rebates_sale_tgt', 'gp_nm_rebates_sale'],
+    category: 'rebates'
+  },
+  {
+    id: 'pa_rebates_by_quarter',
+    title: 'Quarterly rebate disbursements',
+    icon: '📅',
+    query: 'Analyze rebate fee amounts and transaction counts grouped by earned quarter and paid quarter',
+    tags: ['rebate', 'rebates', 'quarter', 'earned_qtr', 'paid_qtr', 'gp_nm_elig_rebates_sale_tgt'],
+    category: 'rebates'
+  },
+  {
+    id: 'pa_active_policy_filters',
+    title: 'Active GP policy filters',
+    icon: '🛡️',
+    query: 'List all active government pricing policy filter rules and criteria',
+    tags: ['policy', 'policy_filter', 'rules', 'price_type', 'gp_nm_policy_filter'],
+    category: 'governance'
+  },
+  {
+    id: 'pa_target_vs_raw_direct_sales',
+    title: 'Raw vs Target direct sales reconciliation',
+    icon: '🔄',
+    query: 'Compare transaction counts and total invoice revenue between raw direct sales and post-filter target direct sales',
+    tags: ['reconciliation', 'target', 'direct sale', 'gp_nm_direct_sale', 'gp_nm_direct_sale_tgt'],
+    category: 'reconciliation'
+  },
+  {
+    id: 'pa_gp_comparison_variances',
+    title: 'GP calculation variances & discrepancies',
+    icon: '⚖️',
+    query: 'Show items with calculation vs baseline differences from gp_comparison_results',
+    tags: ['comparison', 'variance', 'discrepancy', 'gp_comparison_results', 'difference', 'status'],
+    category: 'comparison'
+  },
+  {
+    id: 'pa_gp_amp_calculation',
+    title: 'AMP calculations by product & quarter',
+    icon: '📈',
+    query: 'Show Average Manufacturer Price (AMP) calculations and total units from gp_nm_direct_sale_gp_calc',
+    tags: ['amp', 'gp_calc', 'average manufacturer price', 'total_unit', 'total_amount', 'gp_nm_direct_sale_gp_calc'],
+    category: 'calculation'
+  }
+];
+
 // Map pool by source identifier
 const POOLS_BY_SOURCE = {
   mysql_gpo: GPO_SUGGESTIONS,
   salesforce: SALESFORCE_CRM_SUGGESTIONS,
   mysql_primary: COMMERCIAL_SUGGESTIONS,
+  mysql_priceassure: PRICEASSURE_SUGGESTIONS,
 };
 
 // ============================================================================
@@ -521,6 +621,7 @@ const POOLS_BY_SOURCE = {
 function normalizeSourceId(source) {
   if (!source) return 'mysql_primary';
   const s = String(source).toLowerCase();
+  if (s.includes('priceassure') || s.includes('price_assure') || s.includes('price assure')) return 'mysql_priceassure';
   if (s.includes('gpo') || s.includes('memcot')) return 'mysql_gpo';
   if (s.includes('salesforce') || s.includes('crm')) return 'salesforce';
   return 'mysql_primary';

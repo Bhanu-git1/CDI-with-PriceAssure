@@ -179,6 +179,35 @@ RULES:
 """
 
 
+# DB 4 (PriceAssure) system prompt for Government Pricing (GP) Non-Medicaid, direct sales, chargebacks, rebate sales, calculations, comparisons, and policy filters.
+PRICEASSURE_SYSTEM_PROMPT = """
+You generate Python code to fetch and analyze data from the PriceAssure MySQL database (`gp`), using the Semantic YAML governance rules.
+
+The database supports pharmaceutical government pricing (GP) non-Medicaid calculations, direct invoice sales, wholesaler chargebacks, customer rebates, and policy governance:
+  1. GP CONFIGURATION, AUDIT LOGS & POLICY FILTERS — gp_nm_config (calculation component settings, codes, smoothing, proration), gp_nm_policy_filter (policy rules, price types, conditions, rule values, active status), gp_logs (file upload history, user, date, price_type, status)
+  2. DIRECT SALES (RAW & TARGET)                   — gp_nm_direct_sale (raw manufacturer invoices), gp_nm_direct_sale_tgt (post-filter target direct sales), NDC9/NDC11, WAC price package/unit, Prompt Pay discounts, net prices, sold-to/ship-to customer numbers & Class of Trade, extended WAC/net amounts
+  3. INELIGIBLE SALES & CHARGEBACKS               — gp_nm_inelig_sale (raw wholesaler chargebacks), gp_nm_inelig_sale_tgt (target ineligible sales), gp_nm_inelig_sale_cbk_tgt (target chargebacks), contract prices, wholesaler sold-to/ship-to, customer accounts, FSS and PHS 340B eligibility indicators
+  4. REBATE SALES (RAW & TARGETS)                 — gp_nm_rebates_sale (raw rebate transactions), gp_nm_elig_rebates_sale_tgt (eligible GP rebates), gp_nm_inelig_rebates_sale_tgt (ineligible GP rebates), rebate tier percentages, fee amounts, payer types, contract owners, quarters earned/paid, recipient Class of Trade
+  5. GP CALCULATIONS & VARIANCE COMPARISONS       — gp_nm_direct_sale_gp_calc (AMP calculation results, total units, total amounts by period), gp_nm_direct_sale_gp_calc_src (source baseline figures), gp_comparison_results (calculated vs baseline comparison, unit differences, amount differences, status)
+
+RULES:
+- ALWAYS refer to the SEMANTIC YAML LAYER GOVERNANCE block below for exact table names, column names, join conditions, and pre-defined SQL measures.
+- NEVER invent table or column names. Use ONLY columns listed in the governance block.
+- For direct sales, invoice amounts, Prompt Pay (PP) discounts, and manufacturer-direct WAC/Net pricing queries, query `gp_nm_direct_sale` or `gp_nm_direct_sale_tgt`.
+- For wholesaler indirect sales, chargebacks, basis pricing, and statutory eligibility queries (FSS / PHS 340B), query `gp_nm_inelig_sale`, `gp_nm_inelig_sale_tgt`, or `gp_nm_inelig_sale_cbk_tgt`.
+- For customer rebates, administrative fees, and payer discount queries, query `gp_nm_rebates_sale`, `gp_nm_elig_rebates_sale_tgt`, or `gp_nm_inelig_rebates_sale_tgt`.
+- For GP AMP calculations, total units, and total amounts by period/product, query `gp_nm_direct_sale_gp_calc`.
+- For calculation reconciliation, variances, unit/amount differences, and match status, query `gp_comparison_results`.
+- For file upload execution audit logs, query `gp_logs`.
+- For GP component configuration, smoothing, and proration rules, query `gp_nm_config`.
+- For policy filter rules and criteria, query `gp_nm_policy_filter`.
+- To correlate direct sales with chargebacks, rebates, or calculations by drug or contract, JOIN on `NDC11` or `CONTRACT` or `item_id`.
+- Use standard MySQL SQL syntax.
+- When PRE-DEFINED SQL MEASURES match the user's question, use them as templates.
+- DIAGRAM / ER / RELATIONSHIP REQUESTS: When the user asks for a diagram (relationship diagram, ER diagram, pricing flow, data structure, or architecture view), provide a complete and syntactically valid Mermaid diagram block (```mermaid\nerDiagram ...\n``` or ```mermaid\nflowchart TD ...\n```) in your `answer` field along with a clear explanation of table relationships and join keys. Set `code: null` unless live queries are specifically needed. Never format diagrams as dummy table records.
+"""
+
+
 class LLMService:
     def __init__(self):
         self.semantic_loader = semantic_loader
@@ -492,6 +521,51 @@ class LLMService:
             "Output ONLY the JSON object. Do not wrap in markdown tags like ```json."
         )
 
+    def _get_priceassure_refinement_instructions(self) -> str:
+        return (
+            "You write Python code to fetch or analyze data from the PriceAssure MySQL database via the "
+            "whitelisted 'priceassure' global object.\n"
+            "The available 'priceassure' methods are:\n"
+            "  - priceassure.execute_sql(sql_query: str) -> str: Runs read-only SQL SELECT. Returns a JSON string "
+            "with 'records' and 'totalSize'. Must parse with json.loads().\n"
+            "  - priceassure.describe_table(table_name: str) -> str: Returns column details for one table.\n"
+            "  - priceassure.list_tables() -> str: Returns the list of tables in the database.\n"
+            "  - priceassure.search_records(search_term: str) -> str: Runs cross-table text search. Returns JSON. Must parse with json.loads().\n\n"
+            "IMPORTANT: the global is named 'priceassure', NOT 'db' or 'gpo' or 'sf' or 'datasure'. There is no 'db' object in this scope.\n\n"
+            "Rules for writing code:\n"
+            "  1. You MUST execute queries using priceassure.execute_sql() or priceassure.search_records(). DO NOT hardcode empty lists or mock data.\n"
+            "  2. Parse the returned JSON string using json.loads() to access records.\n"
+            "  3. Store final output in variable 'result' = {'sql': '<query_string>', 'records': <records_list>}.\n"
+            "  4. Global scope has 'priceassure', 'json', 'math', 'datetime', 'date', 'timedelta', 're', 'collections' pre-loaded.\n"
+            "  5. Write valid multi-line Python code with proper line breaks.\n"
+            "  6. TABLE WHITELIST: gp_nm_config, gp_nm_direct_sale, gp_nm_inelig_sale, gp_nm_rebates_sale, gp_nm_policy_filter, gp_nm_direct_sale_tgt, gp_nm_inelig_sale_tgt, gp_nm_inelig_sale_cbk_tgt, gp_nm_elig_rebates_sale_tgt, gp_nm_inelig_rebates_sale_tgt, gp_nm_direct_sale_gp_calc, gp_nm_direct_sale_gp_calc_src, gp_comparison_results, gp_logs.\n"
+            "  7. GREETINGS & SCHEMA QUESTIONS: if the prompt is a greeting or asks what data is available in PriceAssure, set code = null and describe the PriceAssure GP configuration, direct sales, chargebacks, customer rebates, GP calculations (AMP), comparison variances, and processing logs in 'answer' with example prompts.\n"
+            "  8. DIAGRAM & ER MODEL REQUESTS: When the user asks for a diagram (e.g. 'relationship diagram', 'ER diagram', 'pricing flow', 'architecture diagram'), generate a valid Mermaid diagram block (```mermaid\\nerDiagram\\n...\\n``` or ```mermaid\\nflowchart TD\\n...\\n```) in the 'answer' field illustrating the PriceAssure tables and join keys. Set code = null unless live data is requested.\n\n"
+            "Example 1 - Querying Direct Sales Revenue & Prompt Pay Discounts by Product:\n"
+            "sql = \"SELECT PRODUCT_DESC, NDC11, SUM(INVOICE_AMOUNT) as total_sales, SUM(PP_DISCOUNT_AMOUNT) as total_pp_discount, AVG(WAC_PRICE_PKG) as avg_wac FROM gp_nm_direct_sale GROUP BY PRODUCT_DESC, NDC11 ORDER BY total_sales DESC\"\n"
+            "data = json.loads(priceassure.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 2 - Querying Chargeback Totals by Wholesaler and PHS/FSS Eligibility:\n"
+            "sql = \"SELECT WHOLESALER_SOLDTO, FSS_ELIG_IND, PHS_ELIG_IND, SUM(CHARGEBACK_AMOUNT) as total_chargebacks, SUM(EXTENDED_WAC_AMOUNT) as total_wac FROM gp_nm_inelig_sale GROUP BY WHOLESALER_SOLDTO, FSS_ELIG_IND, PHS_ELIG_IND ORDER BY total_chargebacks DESC\"\n"
+            "data = json.loads(priceassure.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 3 - Querying Customer Rebate Fees by Payer Type and Quarter:\n"
+            "sql = \"SELECT PAYER_TYPE, EARNED_QTR, COUNT(TRANSACTION_ID) as rebate_count, SUM(REBATE_FEE_AMOUNT) as total_fees, AVG(REBATE_TIER_PERCENT) as avg_tier FROM gp_nm_elig_rebates_sale_tgt GROUP BY PAYER_TYPE, EARNED_QTR ORDER BY total_fees DESC\"\n"
+            "data = json.loads(priceassure.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Example 4 - Querying Calculation Discrepancies and Variances:\n"
+            "sql = \"SELECT product_name, ndc11, component, unit_difference, amount_difference, status FROM gp_comparison_results WHERE status != 'MATCH' ORDER BY amount_difference DESC\"\n"
+            "data = json.loads(priceassure.execute_sql(sql))\n"
+            "result = {\"sql\": sql, \"records\": data.get(\"records\", [])}\n\n"
+            "Format your output ONLY as a JSON object with these keys:\n"
+            "{\n"
+            "  \"reasoning\": \"your reasoning/steps\",\n"
+            "  \"code\": \"python code string to run or null\",\n"
+            "  \"answer\": \"natural language answer if no database query is required\"\n"
+            "}\n"
+            "Output ONLY the JSON object. Do not wrap in markdown tags like ```json."
+        )
+
     @staticmethod
     def _row_counts_block(ctx) -> str:
         """
@@ -565,6 +639,20 @@ class LLMService:
                 f"CRITICAL REMINDER: You are operating on the DataSure database "
                 f"('{ctx.adapter.database}'). Use the 'datasure' global object. Do NOT reference 'db', 'gpo', or "
                 f"'sf', and do NOT mention Salesforce, SOQL, or any commercial/pharma tables such as "
+                f"Leakage_Activity or fatigue_score — they do not exist here.\n\n"
+                f"User Question: {user_message}"
+            )
+
+        if ctx.id == "mysql_priceassure":
+            return (
+                f"{PRICEASSURE_SYSTEM_PROMPT}\n\n"
+                f"{self._get_priceassure_refinement_instructions()}\n\n"
+                f"{ctx.semantic_context(user_message)}\n\n"
+                f"{self._row_counts_block(ctx)}"
+                f"{history_context}"
+                f"CRITICAL REMINDER: You are operating on the PriceAssure database "
+                f"('{ctx.adapter.database}'). Use the 'priceassure' global object. Do NOT reference 'db', 'gpo', 'sf', or 'datasure', "
+                f"and do NOT mention Salesforce, SOQL, or unrelated commercial/pharma tables such as "
                 f"Leakage_Activity or fatigue_score — they do not exist here.\n\n"
                 f"User Question: {user_message}"
             )

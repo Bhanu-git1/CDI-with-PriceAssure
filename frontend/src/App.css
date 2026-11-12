@@ -1686,6 +1686,19 @@
   color: #8b5cf6;
 }
 
+/* DB 4 — PriceAssure Government Pricing & Non-Medicaid */
+.source-badge-priceassure {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.source-badge-priceassure\ db,
+.source-badge-price_assure,
+.source-badge-price\ assure {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
 /* ---------------------------------------------------------------
    Data source selector (inside the prompt input)
    --------------------------------------------------------------- */
